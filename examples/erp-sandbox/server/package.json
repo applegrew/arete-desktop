@@ -11,6 +11,7 @@
   "dependencies": {
     "@ag-ui/core": "^0.0.54",
     "@arete-ui/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "ai": "^6.0.0",
     "better-sqlite3": "^11.0.0",
     "cors": "^2.8.5",

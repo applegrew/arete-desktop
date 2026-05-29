@@ -1,9 +1,18 @@
 import { Router, type Request, type Response } from 'express';
-import { generateObject, NoObjectGeneratedError, type ModelMessage } from 'ai';
+import { generateObject, generateText, stepCountIs, NoObjectGeneratedError, type ModelMessage } from 'ai';
 import { createOllama } from 'ollama-ai-provider-v2';
 import { z } from 'zod';
 import { deepEqual, type AgentMessage } from '@arete-ui/core';
 import { buildSystemPrompt, type AgentContext } from '../agent-prompt';
+import { getMcpTools } from '../mcp';
+import { loadSkills, renderSkillsForPrompt } from '../skills';
+
+/** A tool the agent called during a turn (surfaced to the UI as AG-UI TOOL_CALL events). */
+export interface ToolCallRecord {
+  toolCallId: string;
+  toolCallName: string;
+  result?: string;
+}
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma4:latest';
@@ -67,14 +76,51 @@ export async function runAgentTurn(body: AgentTurnRequest): Promise<AgentOutcome
     return { ok: false, status: 400, body: { error: 'Missing prompt' } };
   }
   const ctx = context ?? getDefaultContext();
-  const systemPrompt = buildSystemPrompt(ctx);
+  // Skills (SKILL.md instruction bundles) are appended to the system prompt.
+  const systemPrompt = buildSystemPrompt(ctx) + renderSkillsForPrompt(loadSkills());
+
   // Thread prior conversation (history) + the current user prompt. The canonical
   // system prompt is passed separately, so drop any system turns from the transcript.
   const history: ModelMessage[] = (messages ?? [])
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-  const convo: ModelMessage[] = [...history, { role: 'user', content: prompt }];
-  return runAgentWithCorrection(systemPrompt, convo, ctx);
+  let convo: ModelMessage[] = [...history, { role: 'user', content: prompt }];
+
+  // MCP tool pre-step: let the model gather live data via MCP tools (multi-step),
+  // then feed the tool conversation into the envelope step so emissions use real
+  // results. Additive + failure-tolerant — when no tools (or the model can't call
+  // them) this is skipped and behavior is exactly the milestone-1 loop.
+  const toolCalls: ToolCallRecord[] = [];
+  const tools = await getMcpTools();
+  if (Object.keys(tools).length > 0) {
+    try {
+      const pre = await generateText({
+        model: ollama(OLLAMA_MODEL),
+        system: systemPrompt,
+        messages: convo,
+        tools,
+        stopWhen: stepCountIs(4),
+      });
+      for (const step of pre.steps) {
+        const results = new Map<string, string>();
+        for (const tr of step.toolResults ?? []) {
+          results.set(tr.toolCallId, typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output));
+        }
+        for (const tc of step.toolCalls ?? []) {
+          toolCalls.push({ toolCallId: tc.toolCallId, toolCallName: tc.toolName, result: results.get(tc.toolCallId) });
+        }
+      }
+      if (pre.response?.messages?.length) {
+        convo = [...convo, ...(pre.response.messages as ModelMessage[])];
+      }
+    } catch (err) {
+      console.error('[mcp] tool pre-step skipped:', err);
+    }
+  }
+
+  const outcome = await runAgentWithCorrection(systemPrompt, convo, ctx);
+  if (outcome.ok && toolCalls.length > 0) outcome.toolCalls = toolCalls;
+  return outcome;
 }
 
 agentRouter.post('/', async (req: Request, res: Response) => {
@@ -98,7 +144,13 @@ agentRouter.post('/', async (req: Request, res: Response) => {
 const MAX_CORRECTIONS = 2;
 
 export type AgentOutcome =
-  | { ok: true; validated: Array<Record<string, unknown>>; rationale?: string; reply?: string }
+  | {
+      ok: true;
+      validated: Array<Record<string, unknown>>;
+      rationale?: string;
+      reply?: string;
+      toolCalls?: ToolCallRecord[];
+    }
   | { ok: false; status: number; body: Record<string, unknown> };
 
 /**

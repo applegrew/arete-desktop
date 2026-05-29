@@ -41,6 +41,20 @@ aguiRouter.post('/', async (req: Request, res: Response) => {
       return;
     }
 
+    // Tool calls the agent made (via MCP) → native AG-UI tool-call events.
+    for (const tc of outcome.toolCalls ?? []) {
+      send({ type: EventType.TOOL_CALL_START, toolCallId: tc.toolCallId, toolCallName: tc.toolCallName });
+      if (tc.result !== undefined) {
+        send({
+          type: EventType.TOOL_CALL_RESULT,
+          toolCallId: tc.toolCallId,
+          messageId: `tool:${tc.toolCallId}`,
+          content: tc.result,
+        });
+      }
+      send({ type: EventType.TOOL_CALL_END, toolCallId: tc.toolCallId });
+    }
+
     // Thinking (rationale) + visible reply as native text messages.
     if (outcome.rationale) {
       emitText(send, `thinking:${runId}`, outcome.rationale, 'assistant');

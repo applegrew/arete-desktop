@@ -385,6 +385,10 @@ export function App() {
         // Stream the turn over AG-UI; the decoder hands us normalized results,
         // which we route through the SAME Diff pipeline as before.
         await streamAgent(text, priorMessages, agentContext, {
+          onToolCallStart: ({ toolCallName }) => {
+            clearAsking();
+            chatStore.push({ role: 'system', text: `🔧 Called MCP tool: ${toolCallName ?? 'tool'}` });
+          },
           onTextEnd: ({ messageId, text: msgText }) => {
             clearAsking();
             if (!msgText) return;
