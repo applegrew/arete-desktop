@@ -1,5 +1,5 @@
 {
-  "name": "erp-sandbox-server",
+  "name": "chat-server",
   "version": "0.0.0",
   "private": true,
   "type": "module",

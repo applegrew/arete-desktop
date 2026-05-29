@@ -96,12 +96,18 @@ Self-check BEFORE returning your JSON:
 2. For every component, is every string in its "child" / "children" field also present as an "id" on another component in the same array?
 If either check fails, fix it before responding. The server will reject responses that fail these checks.
 
+Pages are DYNAMIC: there is a chat home plus zero or more workspace pages (tabs), listed under "Pages"
+below. To put UI on a NEW page, first emit a createPage op, then place surfaces onto it (setPageRegion /
+pinSurface) using the same pageId. Use an existing pageId (from the Pages list) to add to a page that
+already exists. pageId is a short slug you choose (e.g. "reports"); title is the human label.
+
 Available page operations:
-- pinSurface: { name:"pinSurface", surfaceId:"<chatSurfaceId>", pageId:"tickets"|"reports", region?:string }
-- unpinSurface: { name:"unpinSurface", surfaceId:"<surfaceId>", pageId:"tickets"|"reports" }
-- moveSurface: { name:"moveSurface", surfaceId:"<surfaceId>", pageId:"tickets"|"reports", targetRegion:"<regionId>" }
-- setPageRegion: { name:"setPageRegion", pageId:"tickets"|"reports", regionId:"<regionId>", surfaceId:"<surfaceId>"|null }
-- setPageLayout: { name:"setPageLayout", pageId:"tickets"|"reports", layout:{ kind:"grid", rows:number, cols:number, regions:[{id:string},...] } }
+- createPage: { name:"createPage", pageId:"<newPageId>", title:"<Human Title>", layout?:{ kind:"grid", rows:number, cols:number, regions:[{id:string},...] } }
+- pinSurface: { name:"pinSurface", surfaceId:"<chatSurfaceId>", pageId:"<pageId>", region?:string }
+- unpinSurface: { name:"unpinSurface", surfaceId:"<surfaceId>", pageId:"<pageId>" }
+- moveSurface: { name:"moveSurface", surfaceId:"<surfaceId>", pageId:"<pageId>", targetRegion:"<regionId>" }
+- setPageRegion: { name:"setPageRegion", pageId:"<pageId>", regionId:"<regionId>", surfaceId:"<surfaceId>"|null }
+- setPageLayout: { name:"setPageLayout", pageId:"<pageId>", layout:{ kind:"grid", rows:number, cols:number, regions:[{id:string},...] } }
 
 Current workspace state:
 - Active tab the user is looking at: ${ctx.activeTabId ?? '(unknown)'}
@@ -148,14 +154,15 @@ Rules:
 4. When the user asks to MODIFY an existing surface ("change to bar", "add Closed"), emit ONE updateComponents message targeting that surface's actual surfaceId (NOT "<PLACEHOLDER>") with the full updated components array. Keep component ids stable so diffs are minimal.
 5. Pronoun & region resolution — DO NOT ask the user to clarify these unless truly ambiguous:
    - "it" / "this" / "that" / "the chart" / "the panel" → use the Most-recent surface from context above.
-   - "the page" / "this page" / "current page" → use the Active tab from context above (if it's "tickets" or "reports"). If active tab is "chat", default to "tickets".
-   - "top left" / "bottom right" etc → match against the active page's layout regions ("top-left", "top-right", "bottom-left", "bottom-right", "left", "right").
+   - "the page" / "this page" / "current page" → use the Active tab if it is a workspace page. If the active tab is "chat" or no page exists yet, create one with createPage (pick a sensible pageId + title) and target it.
+   - "top left" / "bottom right" etc → match against that page's layout regions (e.g. "top-left", "top-right", "bottom-left", "bottom-right", "left", "right").
 6. Page operation selection:
-   - **pinSurface**: place an UNPINNED surface (one not in the page mapping) on a page. Use when user says "add X to the page" or "show X on tickets" and X is not yet in the page mapping.
-   - **setPageRegion**: place a surface in a specific region (overwrites any existing surface there). Use when user says "put X in top-left" — works whether X is pinned or not.
-   - **moveSurface**: relocate a surface that is ALREADY in the page mapping (must appear in tickets.mapping or reports.mapping). Wrong choice for unpinned surfaces — will error.
-   - **unpinSurface**: remove from page mapping (returns to chat scroll).
-   When asked to "add the chart to top-left" and the chart is NOT yet in the page mapping, emit setPageRegion (or pinSurface with region="top-left"). Only emit moveSurface if the chart's surfaceId already appears in that page's mapping.
+   - **createPage**: create a NEW page (tab). Required before placing surfaces on a page that isn't in the Pages list. Default layout is a 2×2 grid (regions top-left/top-right/bottom-left/bottom-right) unless you pass one.
+   - **pinSurface**: place an UNPINNED surface on an EXISTING page. Use for "add X to the <page>" when X isn't yet in that page's mapping.
+   - **setPageRegion**: place a surface in a specific region (overwrites any existing there). Use for "put X in top-left" — works whether X is pinned or not.
+   - **moveSurface**: relocate a surface ALREADY in a page's mapping. Wrong choice for unpinned surfaces — will error.
+   - **unpinSurface**: remove from a page mapping (returns to chat scroll).
+   To "create a page and put a chart on it": emit createPage, then a2ui surface, then setPageRegion targeting the new pageId.
 7. The pageOp's surfaceId should be the actual existing surfaceId (e.g. agent-sfc-1), NOT "<PLACEHOLDER>", unless you're creating a brand-new surface in the same response.
 8. Use Card+Column for grouped content. Keep text concise.
 9. Surface ID convention: "<PLACEHOLDER>" means "give me a fresh surface" — server mints a new ID. To target an existing surface, use its actual ID from the workspace state below.
@@ -171,18 +178,19 @@ Output format:
   ]
 }
 
-Example — "add a bar graph to the page" when active tab is "tickets" and nothing is on the page yet (create the surface AND place it):
+Example — "create a page called Reports and add a bar graph of ticket status to it" (no such page yet — create it, create the surface, place it):
 {
-  "reply": "I've added a bar graph of ticket status to the top-left of your tickets page.",
-  "rationale": "Created a new Chart surface and placed it via setPageRegion in the active tickets page's top-left region.",
+  "reply": "I've created a Reports page with a bar graph of ticket status.",
+  "rationale": "No Reports page exists, so createPage first, then a new Chart surface placed in its top-left via setPageRegion.",
   "emissions": [
+    {"kind":"pageOp","op":{"name":"createPage","pageId":"reports","title":"Reports"}},
     {"kind":"a2ui", "targetSurfaceId":"<PLACEHOLDER>", "messages":[
       {"version":"v0.9","createSurface":{"surfaceId":"<PLACEHOLDER>","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json"}},
       {"version":"v0.9","updateComponents":{"surfaceId":"<PLACEHOLDER>","components":[
         {"id":"root","component":"Chart","type":"bar","labels":["Open","Pending","Resolved"],"data":[12,5,23],"title":"Tickets by status"}
       ]}}
     ]},
-    {"kind":"pageOp","op":{"name":"setPageRegion","pageId":"tickets","regionId":"top-left","surfaceId":"<PLACEHOLDER>"}}
+    {"kind":"pageOp","op":{"name":"setPageRegion","pageId":"reports","regionId":"top-left","surfaceId":"<PLACEHOLDER>"}}
   ]
 }
 

@@ -1,11 +1,11 @@
-import { Router, type Request, type Response } from 'express';
 import { generateObject, generateText, stepCountIs, NoObjectGeneratedError, type ModelMessage } from 'ai';
 import { createOllama } from 'ollama-ai-provider-v2';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { deepEqual, type AgentMessage } from '@arete-ui/core';
-import { buildSystemPrompt, type AgentContext } from '../agent-prompt';
-import { getMcpTools } from '../mcp';
-import { loadSkills, renderSkillsForPrompt } from '../skills';
+import { buildSystemPrompt, type AgentContext } from './prompt';
+import { getMcpTools } from './mcp';
+import { loadSkills, renderSkillsForPrompt } from './skills';
 
 /** A tool the agent called during a turn (surfaced to the UI as AG-UI TOOL_CALL events). */
 export interface ToolCallRecord {
@@ -14,15 +14,42 @@ export interface ToolCallRecord {
   result?: string;
 }
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma4:latest';
+/** Runtime configuration for an agent turn (overrides env defaults). */
+export interface AgentRuntimeOptions {
+  /** Ollama model name (default: $OLLAMA_MODEL or gemma4:latest). */
+  model?: string;
+  /** Ollama base URL (default: $OLLAMA_URL or http://localhost:11434). */
+  ollamaUrl?: string;
+  /** Directory of SKILL.md skill folders to load (default: $ARETE_SKILLS_DIR or <cwd>/skills). */
+  skillsDir?: string;
+}
 
-// The agent loop is consumer-owned (arete-ui ships no transport). We use the
-// Vercel AI SDK for the loop: structured output + retries replace the old
-// hand-rolled JSON extraction, and `messages` threads real conversation
-// history. Surface-id minting/injection, component-graph validation, and
-// pageOp placeholder resolution stay here — they are arete-domain concerns.
-const ollama = createOllama({ baseURL: `${OLLAMA_URL}/api` });
+function ollamaBaseUrl(opts?: AgentRuntimeOptions): string {
+  return opts?.ollamaUrl || process.env.OLLAMA_URL || 'http://localhost:11434';
+}
+function modelName(opts?: AgentRuntimeOptions): string {
+  return opts?.model || process.env.OLLAMA_MODEL || 'gemma4:latest';
+}
+function resolveModel(opts?: AgentRuntimeOptions) {
+  return createOllama({ baseURL: `${ollamaBaseUrl(opts)}/api` })(modelName(opts));
+}
+
+/** Liveness/info probe used by the AG-UI router's /health. */
+export async function agentHealth(
+  opts?: AgentRuntimeOptions,
+): Promise<{ ok: boolean; model?: string; available?: string[] }> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    const resp = await fetch(`${ollamaBaseUrl(opts)}/api/tags`, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!resp.ok) throw new Error(`Ollama returned ${resp.status}`);
+    const data = (await resp.json()) as { models?: Array<{ name: string }> };
+    return { ok: true, model: modelName(opts), available: data.models?.map((m) => m.name) ?? [] };
+  } catch {
+    return { ok: false };
+  }
+}
 
 /** Zod mirror of @arete-ui/core's AgentResponse *envelope*. A2UI message
  *  internals stay loose (`z.any()`); they're validated by the domain checks. */
@@ -39,68 +66,56 @@ const envelopeSchema = z.object({
 });
 type Envelope = z.infer<typeof envelopeSchema>;
 
-export const agentRouter = Router();
-
-agentRouter.get('/health', async (_req: Request, res: Response) => {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
-    const resp = await fetch(`${OLLAMA_URL}/api/tags`, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!resp.ok) throw new Error(`Ollama returned ${resp.status}`);
-    const data = (await resp.json()) as { models?: Array<{ name: string }> };
-    res.json({
-      ok: true,
-      model: OLLAMA_MODEL,
-      available: data.models?.map((m) => m.name) ?? [],
-    });
-  } catch {
-    res.json({ ok: false });
-  }
-});
-
 export interface AgentTurnRequest {
   prompt: string;
   messages?: AgentMessage[];
   context?: AgentContext;
 }
 
+export type AgentOutcome =
+  | {
+      ok: true;
+      validated: Array<Record<string, unknown>>;
+      rationale?: string;
+      reply?: string;
+      toolCalls?: ToolCallRecord[];
+    }
+  | { ok: false; status: number; body: Record<string, unknown> };
+
+/** Max corrective re-asks (shared budget across parse + domain failures). */
+const MAX_CORRECTIONS = 2;
+
 /**
- * Runs one agent turn end-to-end (system prompt + history + correction loop) and
- * returns the {@link AgentOutcome}. Shared by the JSON route (`/api/agent`) and
- * the AG-UI streaming route (`/api/agui`).
+ * Runs one agent turn end-to-end (skills → system prompt → history → MCP tool
+ * pre-step → structured emission + correction loop). Stateless: no persistence,
+ * no transport. Surface-id minting/injection, component-graph validation, no-op
+ * detection, and pageOp placeholder resolution are arete-domain concerns kept here.
  */
-export async function runAgentTurn(body: AgentTurnRequest): Promise<AgentOutcome> {
+export async function runAgentTurn(body: AgentTurnRequest, opts?: AgentRuntimeOptions): Promise<AgentOutcome> {
   const { prompt, messages, context } = body;
   if (!prompt) {
     return { ok: false, status: 400, body: { error: 'Missing prompt' } };
   }
+  const model = resolveModel(opts);
   const ctx = context ?? getDefaultContext();
   // Skills (SKILL.md instruction bundles) are appended to the system prompt.
-  const systemPrompt = buildSystemPrompt(ctx) + renderSkillsForPrompt(loadSkills());
+  const systemPrompt = buildSystemPrompt(ctx) + renderSkillsForPrompt(loadSkills(opts?.skillsDir));
 
-  // Thread prior conversation (history) + the current user prompt. The canonical
-  // system prompt is passed separately, so drop any system turns from the transcript.
+  // Thread prior conversation (history) + current prompt. The canonical system
+  // prompt is passed separately, so drop any system turns from the transcript.
   const history: ModelMessage[] = (messages ?? [])
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
   let convo: ModelMessage[] = [...history, { role: 'user', content: prompt }];
 
   // MCP tool pre-step: let the model gather live data via MCP tools (multi-step),
-  // then feed the tool conversation into the envelope step so emissions use real
-  // results. Additive + failure-tolerant — when no tools (or the model can't call
-  // them) this is skipped and behavior is exactly the milestone-1 loop.
+  // then feed the tool conversation into the envelope step. Additive + failure-
+  // tolerant — when no tools (or the model can't call them) this is skipped.
   const toolCalls: ToolCallRecord[] = [];
   const tools = await getMcpTools();
   if (Object.keys(tools).length > 0) {
     try {
-      const pre = await generateText({
-        model: ollama(OLLAMA_MODEL),
-        system: systemPrompt,
-        messages: convo,
-        tools,
-        stopWhen: stepCountIs(4),
-      });
+      const pre = await generateText({ model, system: systemPrompt, messages: convo, tools, stopWhen: stepCountIs(4) });
       for (const step of pre.steps) {
         const results = new Map<string, string>();
         for (const tr of step.toolResults ?? []) {
@@ -118,50 +133,13 @@ export async function runAgentTurn(body: AgentTurnRequest): Promise<AgentOutcome
     }
   }
 
-  const outcome = await runAgentWithCorrection(systemPrompt, convo, ctx);
+  const outcome = await runAgentWithCorrection(model, systemPrompt, convo, ctx);
   if (outcome.ok && toolCalls.length > 0) outcome.toolCalls = toolCalls;
   return outcome;
 }
 
-agentRouter.post('/', async (req: Request, res: Response) => {
-  try {
-    const outcome = await runAgentTurn(req.body as AgentTurnRequest);
-    if (!outcome.ok) {
-      res.status(outcome.status).json(outcome.body);
-      return;
-    }
-    res.json({
-      emissions: outcome.validated,
-      rationale: outcome.rationale,
-      reply: outcome.reply,
-    });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-/** Max corrective re-asks (shared budget across parse + domain failures). */
-const MAX_CORRECTIONS = 2;
-
-export type AgentOutcome =
-  | {
-      ok: true;
-      validated: Array<Record<string, unknown>>;
-      rationale?: string;
-      reply?: string;
-      toolCalls?: ToolCallRecord[];
-    }
-  | { ok: false; status: number; body: Record<string, unknown> };
-
-/**
- * Runs the model and self-corrects on BOTH failure modes by feeding the error
- * back to the agent and re-asking (bounded by MAX_CORRECTIONS):
- *  - parse/envelope failure (`NoObjectGeneratedError`) → resend the raw output
- *    + the parse error and ask for valid JSON;
- *  - domain failure (malformed component graph / unknown surface) → resend the
- *    rejected JSON + the specific issues and ask for a fix.
- */
 async function runAgentWithCorrection(
+  model: ReturnType<typeof resolveModel>,
   systemPrompt: string,
   baseConvo: ModelMessage[],
   ctx: AgentContext,
@@ -172,9 +150,9 @@ async function runAgentWithCorrection(
   while (true) {
     let envelope: Envelope;
     try {
-      envelope = await generate(systemPrompt, convo);
+      const { object } = await generateObject({ model, schema: envelopeSchema, system: systemPrompt, messages: convo });
+      envelope = object;
     } catch (err) {
-      // Parse / schema failure: feed the raw text + cause back for a re-ask.
       if (NoObjectGeneratedError.isInstance(err) && corrections < MAX_CORRECTIONS) {
         corrections++;
         const raw = err.text?.trim();
@@ -196,12 +174,11 @@ async function runAgentWithCorrection(
           body: { error: `Agent did not return valid JSON after ${MAX_CORRECTIONS} correction attempts: ${err.message}` },
         };
       }
-      throw err; // non-parse error → outer 500 handler
+      throw err;
     }
 
     const result = processEmissions(envelope.emissions ?? [], ctx);
 
-    // Hard failure: malformed component graph / unknown surface.
     if (result.issues.length > 0) {
       if (corrections < MAX_CORRECTIONS) {
         corrections++;
@@ -219,9 +196,6 @@ async function runAgentWithCorrection(
       };
     }
 
-    // Soft failure (honesty): updateComponents identical to what's rendered.
-    // The agent is claiming a change it didn't make — re-ask for honesty, and
-    // if it persists, strip the no-op so the UI never shows a phantom update.
     if (result.noops.length > 0) {
       if (corrections < MAX_CORRECTIONS) {
         corrections++;
@@ -248,28 +222,15 @@ async function runAgentWithCorrection(
   }
 }
 
-async function generate(system: string, messages: ModelMessage[]): Promise<Envelope> {
-  const { object } = await generateObject({
-    model: ollama(OLLAMA_MODEL),
-    schema: envelopeSchema,
-    system,
-    messages,
-  });
-  return object;
-}
-
 interface ProcessResult {
   validated: Array<Record<string, unknown>>;
-  /** Hard failures (malformed graph / unknown surface) — block the response. */
   issues: string[];
-  /** Existing surfaceIds whose updateComponents is identical to what's already
-   *  rendered (a no-op). The agent claimed a change it didn't actually make. */
   noops: string[];
 }
 
 /** Validates + normalizes raw emissions: mints/injects surfaceIds, checks the
- *  component graph, and resolves pageOp placeholders. */
-function processEmissions(emissions: Array<Record<string, unknown>>, ctx: AgentContext): ProcessResult {
+ *  component graph, detects no-ops, and resolves pageOp placeholders. */
+export function processEmissions(emissions: Array<Record<string, unknown>>, ctx: AgentContext): ProcessResult {
   const validated: Array<Record<string, unknown>> = [];
   const issues: string[] = [];
   const noops: string[] = [];
@@ -298,16 +259,12 @@ function processEmissions(emissions: Array<Record<string, unknown>>, ctx: AgentC
       issues.push(...validateComponentReferences(processed));
       validated.push({ kind: 'a2ui', targetSurfaceId: targetId, messages: processed });
 
-      // No-op detection: an updateComponents on an existing surface whose
-      // components are identical to what's already rendered changes nothing.
       if (!isPlaceholder && !hasCreate && knownSurfaces.has(declared)) {
         const live = ctx.surfaces?.[declared]?.components;
         const updates = processed.filter((m) => 'updateComponents' in m);
         const allNoop =
           updates.length > 0 &&
-          updates.every((m) =>
-            sameComponentSet(live, (m.updateComponents as Record<string, unknown>).components),
-          );
+          updates.every((m) => sameComponentSet(live, (m.updateComponents as Record<string, unknown>).components));
         if (allNoop) noops.push(declared);
       }
     } else if (em.kind === 'pageOp') {
@@ -319,8 +276,7 @@ function processEmissions(emissions: Array<Record<string, unknown>>, ctx: AgentC
   return { validated, issues, noops };
 }
 
-/** Id-keyed deep comparison of two A2UI component arrays (order-independent,
- *  matching the diff engine's id-based semantics). */
+/** Id-keyed deep comparison of two A2UI component arrays (order-independent). */
 function sameComponentSet(prev: unknown, next: unknown): boolean {
   if (!Array.isArray(prev) || !Array.isArray(next)) return false;
   const byId = (arr: unknown[]): Map<string, unknown> => {
@@ -339,9 +295,9 @@ function sameComponentSet(prev: unknown, next: unknown): boolean {
   return true;
 }
 
-let surfaceCounter = 0;
+/** Unique surface id (UUID-based) — never collides across pages/conversations/restarts. */
 function mintSurfaceId(): string {
-  return `agent-sfc-${++surfaceCounter}`;
+  return `agent-sfc-${randomUUID().slice(0, 8)}`;
 }
 
 function validateComponentReferences(messages: Array<Record<string, unknown>>): string[] {
@@ -379,9 +335,7 @@ function validateComponentReferences(messages: Array<Record<string, unknown>>): 
             `Component "${id}" has malformed action. Expected { event: { name: string, context?: object } }; got ${JSON.stringify(action)}.`,
           );
         } else if (ev.context !== undefined && (typeof ev.context !== 'object' || ev.context === null || Array.isArray(ev.context))) {
-          issues.push(
-            `Component "${id}" action.event.context must be an object (got ${JSON.stringify(ev.context)}).`,
-          );
+          issues.push(`Component "${id}" action.event.context must be an object (got ${JSON.stringify(ev.context)}).`);
         }
       }
     }
@@ -393,13 +347,7 @@ function injectSurfaceId(msg: Record<string, unknown>, surfaceId: string): Recor
   const m = { ...msg };
   if ('createSurface' in m) {
     const cs = (m.createSurface as Record<string, unknown>) ?? {};
-    m.createSurface = {
-      // Default sendDataModel: true so the renderer attaches data-model
-      // snapshots on every client→server message (A2UI canonical).
-      sendDataModel: true,
-      ...cs,
-      surfaceId,
-    };
+    m.createSurface = { sendDataModel: true, ...cs, surfaceId };
   }
   if ('updateComponents' in m) {
     m.updateComponents = { ...(m.updateComponents as Record<string, unknown>), surfaceId };
@@ -416,27 +364,13 @@ function injectSurfaceId(msg: Record<string, unknown>, surfaceId: string): Recor
 function getDefaultContext(): AgentContext {
   return {
     chatSurfaceIds: [],
-    pages: {
-      tickets: {
-        layout: {
-          kind: 'grid',
-          rows: 2,
-          cols: 2,
-          regions: [{ id: 'top-left' }, { id: 'top-right' }, { id: 'bottom-left' }, { id: 'bottom-right' }],
-        },
-        mapping: {},
-      },
-      reports: {
-        layout: { kind: 'grid', rows: 1, cols: 2, regions: [{ id: 'left' }, { id: 'right' }] },
-        mapping: {},
-      },
-    },
+    pages: {},
     surfaces: {},
     recentSurfaceIds: [],
     recentActions: [],
     recentPinnedSurfaceId: null,
     mostRecentSurfaceId: null,
-    activeTabId: 'tickets',
+    activeTabId: 'chat',
     diagnostics: [],
   };
 }

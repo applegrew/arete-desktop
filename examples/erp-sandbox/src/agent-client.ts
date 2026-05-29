@@ -10,7 +10,7 @@ export interface AgentHealth {
 
 export async function getAgentHealth(): Promise<AgentHealth> {
   try {
-    const res = await fetch('/api/agent/health');
+    const res = await fetch('/api/agui/health');
     return res.json();
   } catch {
     return { ok: false };

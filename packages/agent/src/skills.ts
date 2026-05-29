@@ -1,28 +1,32 @@
 import { readFileSync, readdirSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 
 /**
  * Minimal Anthropic Agent Skills (SKILL.md) loader. A skill is a directory under
- * `skills/` containing a `SKILL.md` with YAML frontmatter (`name`, `description`)
- * and a Markdown body of instructions. v1 loads the instruction bundles into the
- * system prompt; sandboxed script execution is future scope.
+ * the skills dir containing a `SKILL.md` with YAML frontmatter (`name`,
+ * `description`) and a Markdown body of instructions. v1 loads the instruction
+ * bundles into the system prompt; sandboxed script execution is future scope.
+ *
+ * The skills dir is supplied by the consuming app (the package is bundled, so a
+ * path relative to this module would be wrong). Defaults to `ARETE_SKILLS_DIR`
+ * or `<cwd>/skills`.
  */
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SKILLS_DIR = join(__dirname, '..', 'skills');
-
 export interface Skill {
   name: string;
   description: string;
   body: string;
 }
 
-export function loadSkills(): Skill[] {
-  if (!existsSync(SKILLS_DIR)) return [];
+function defaultSkillsDir(): string {
+  return process.env.ARETE_SKILLS_DIR || join(process.cwd(), 'skills');
+}
+
+export function loadSkills(skillsDir: string = defaultSkillsDir()): Skill[] {
+  if (!existsSync(skillsDir)) return [];
   const skills: Skill[] = [];
-  for (const entry of readdirSync(SKILLS_DIR, { withFileTypes: true })) {
+  for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    const file = join(SKILLS_DIR, entry.name, 'SKILL.md');
+    const file = join(skillsDir, entry.name, 'SKILL.md');
     if (!existsSync(file)) continue;
     skills.push(parseSkill(readFileSync(file, 'utf8'), entry.name));
   }

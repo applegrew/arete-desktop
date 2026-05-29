@@ -10,6 +10,7 @@ dist/
 coverage/
 *.tsbuildinfo
 examples/erp-sandbox/server/data/
+apps/chat/server/data/
 
 # Tooling / local scratch
 .playwright-mcp/
@@ -18,3 +19,4 @@ graphify-out/
 autoswitch-*.png
 chart-legend-*.png
 agui-*.png
+chat-*.png

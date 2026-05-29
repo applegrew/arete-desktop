@@ -3,27 +3,27 @@ import cors from 'cors';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAgentRouter } from '@arete-ui/agent';
-import { stateRouter } from './routes/state';
+import { pagesRouter } from './routes/pages';
+import { surfacesRouter } from './routes/surfaces';
 import { chatRouter } from './routes/chat';
-import { approvalsRouter } from './routes/approvals';
+import { stateRouter } from './routes/state';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8787;
 
 app.use(cors());
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '4mb' }));
 
-app.use('/api/state', stateRouter);
+app.use('/api/pages', pagesRouter);
+app.use('/api/surfaces', surfacesRouter);
 app.use('/api/chat', chatRouter);
-app.use('/api/approvals', approvalsRouter);
-// Agent loop (AG-UI SSE + /health) now lives in @arete-ui/agent.
+app.use('/api/state', stateRouter);
+// Stateless agent loop (AG-UI SSE + /health) from @arete-ui/agent.
 app.use('/api/agui', createAgentRouter({ skillsDir: join(__dirname, '..', 'skills') }));
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
-});
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.listen(PORT, () => {
-  console.log(`[arete-sandbox-server] listening on http://localhost:${PORT}`);
+  console.log(`[arete-chat-server] listening on http://localhost:${PORT}`);
 });
