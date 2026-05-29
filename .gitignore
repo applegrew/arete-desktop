@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.turbo/
+.vite/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+coverage/
+*.tsbuildinfo
+examples/erp-sandbox/server/data/
+
+# Tooling / local scratch
+.playwright-mcp/
+graphify-out/
+# Local debug screenshots
+autoswitch-*.png
+chart-legend-*.png
