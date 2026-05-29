@@ -253,3 +253,25 @@ The sandbox demonstrates: chat full-page on chat tab; chat docked on other tabs;
 12. Catalog plug-in proof: swap BasicCatalog → `@arete-ui/adapter-dew` without touching arete-ui core; same prompt fixtures still render and diff correctly.
 13. `examples/erp-sandbox`: full Shell + Page + Chat + Diff loop with the prompt fixture set above. Mock agent + SQLite persistence demonstrate the hook wiring.
 14. Agent reply routing: prompt typed in docked chat on a non-chat tab — reply lands as a new surface in the chat scroll, NOT silently on the page.
+
+---
+
+## Todos
+
+### Actionable components (framework + adapter)
+- **More PrimeReact adapter components** — DataTable, Dialog, Calendar, Dropdown, MultiSelect, AutoComplete, TreeTable, FileUpload, TabView, Carousel, Paginator, Sidebar, Toast, Accordion, OrderList/PickList. Each wires through `useAction` from `@arete-ui/core` with the category-specific auto-context shape documented in `packages/core/src/types/action.ts`.
+- **Migrate CheckBox and TextField to `useAction`** — currently use raw callable / two-way binding; align with the canonical pattern so value changes flow through `onUserAction`.
+- **Action gating / approval** — for destructive actions (delete, archive), add a per-action `confirm: boolean` policy that gates dispatch through a confirm-dialog before firing the user-action hook. Mirrors the diff-approval pattern.
+- **A2UI expression evaluator wiring** — resolve `{path: "/items/n/x"}` and `{call: "...", args: {...}}` in `action.event.context` so per-item bindings work end-to-end. Today we only forward literal contexts plus component auto-context.
+
+### Page-perception extensions
+- **UI-runtime state beyond data model** — focused element id, scroll position per surface, hover targets. Not canonical in A2UI v0.9; arete-ui extension via a `clientUIState` field on the per-prompt context.
+- **Streaming data-model updates** — today we poll the live processor at prompt-build time. Move to the canonical A2UI `metadata.a2uiClientDataModel` attachment on every client→server message once we switch transports from HTTP polling to SSE / WebSocket.
+
+### Agent loop quality
+- **Multi-step action chains** — action → form modal → submit → next action. Requires the agent to track an action-flow state machine across turns.
+- **Server-side validation depth** — schema-validate every emission's component-specific props (Chart needs `labels.length === data.length`; Calendar needs valid date ranges; etc.). Today only `id` / `children` references are validated.
+
+### Workspace
+- **Out-of-the-box catalogs beyond PrimeReact** — fw-dew adapter (Freshworks design system), MUI adapter, Ant Design adapter. Each is a new `packages/adapter-<name>` package wired to the same `@arete-ui/core` hooks.
+- **Persistence reference adapter** — the example sandbox has its own SQLite layer; extract a reusable `@arete-ui/persistence-rest` adapter so consumers don't have to roll their own.
