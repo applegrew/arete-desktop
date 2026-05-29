@@ -14,6 +14,7 @@ import {
   DiffOverlay,
   PageOpsHarness,
   ActionHarness,
+  RenderDiagnosticsStore,
   withComponentIds,
   buildAgentContext,
   type ShellTab,
@@ -23,7 +24,7 @@ import {
   type UserAction,
   type SurfaceSnapshot,
 } from '@arete-ui/core';
-import { primeReactCatalog } from '@arete-ui/adapter-primereact';
+import { primeReactCatalog, componentAgentHints } from '@arete-ui/adapter-primereact';
 import { fixtures, findFixture, type Emission, type FixtureContext } from './mock-agent';
 import {
   loadState,
@@ -89,6 +90,7 @@ export function App() {
   );
   const harness = useMemo(() => new PageOpsHarness(), []);
   const actionHarness = useMemo(() => new ActionHarness(), []);
+  const renderDiagnostics = useMemo(() => new RenderDiagnosticsStore(), []);
   const chatStore = useMemo(() => new ChatStore(), []);
   const [ticketsMapping, setTicketsMapping] = useState<Record<string, string>>({});
   const [reportsMapping, setReportsMapping] = useState<Record<string, string>>({});
@@ -351,6 +353,8 @@ export function App() {
       const { messages: allMessages, ...agentContext } = buildAgentContext({
         chatStore,
         actionHarness,
+        renderDiagnostics,
+        componentHints: componentAgentHints,
         surfaces: surfacesPayload,
         pages: {
           tickets: { layout: ticketsLayout, mapping: ticketsMapping },
@@ -403,7 +407,7 @@ export function App() {
         });
       }
     },
-    [agentMode, chatStore, handleEmission, buildCtx, diffsGated, router, harness, ticketsLayout, ticketsMapping, reportsLayout, reportsMapping, shellState.activeTabId, actionHarness, liveProcessor, captureSurfaceContents],
+    [agentMode, chatStore, handleEmission, buildCtx, diffsGated, router, harness, ticketsLayout, ticketsMapping, reportsLayout, reportsMapping, shellState.activeTabId, actionHarness, renderDiagnostics, liveProcessor, captureSurfaceContents],
   );
 
   // Keep the ref in sync so the action-harness hook can call handlePrompt without re-binding.
@@ -487,6 +491,7 @@ export function App() {
         state={shellState}
         onStateChange={setShellState}
         harness={harness}
+        renderDiagnostics={renderDiagnostics}
         chatTab={{
           tab: { id: 'chat', label: 'Chat', icon: <span>💬</span> },
           renderSurface: renderChatSurface,

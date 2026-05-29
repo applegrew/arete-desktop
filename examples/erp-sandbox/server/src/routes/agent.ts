@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { generateObject, NoObjectGeneratedError, type ModelMessage } from 'ai';
 import { createOllama } from 'ollama-ai-provider-v2';
 import { z } from 'zod';
-import type { AgentMessage } from '@arete-ui/core';
+import { deepEqual, type AgentMessage } from '@arete-ui/core';
 import { buildSystemPrompt, type AgentContext } from '../agent-prompt';
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
@@ -142,26 +142,51 @@ async function runAgentWithCorrection(
     }
 
     const result = processEmissions(envelope.emissions ?? [], ctx);
-    if (result.issues.length === 0) {
-      return { ok: true, validated: result.validated, rationale: envelope.rationale, reply: envelope.reply };
+
+    // Hard failure: malformed component graph / unknown surface.
+    if (result.issues.length > 0) {
+      if (corrections < MAX_CORRECTIONS) {
+        corrections++;
+        convo.push({ role: 'assistant', content: JSON.stringify(envelope) });
+        convo.push({
+          role: 'user',
+          content: `Your previous response had these issues:\n- ${result.issues.join('\n- ')}\n\nFix every issue and resend the corrected JSON only. Same schema, no commentary.`,
+        });
+        continue;
+      }
+      return {
+        ok: false,
+        status: 422,
+        body: { error: `Agent produced an invalid response after ${MAX_CORRECTIONS} correction attempts`, issues: result.issues },
+      };
     }
 
-    // Domain failure: feed the specific issues back for a re-ask.
-    if (corrections < MAX_CORRECTIONS) {
-      corrections++;
-      convo.push({ role: 'assistant', content: JSON.stringify(envelope) });
-      convo.push({
-        role: 'user',
-        content: `Your previous response had these issues:\n- ${result.issues.join('\n- ')}\n\nFix every issue and resend the corrected JSON only. Same schema, no commentary.`,
-      });
-      continue;
+    // Soft failure (honesty): updateComponents identical to what's rendered.
+    // The agent is claiming a change it didn't make — re-ask for honesty, and
+    // if it persists, strip the no-op so the UI never shows a phantom update.
+    if (result.noops.length > 0) {
+      if (corrections < MAX_CORRECTIONS) {
+        corrections++;
+        convo.push({ role: 'assistant', content: JSON.stringify(envelope) });
+        convo.push({
+          role: 'user',
+          content:
+            `Your updateComponents for surface(s) [${result.noops.join(', ')}] is identical to what is ` +
+            `already rendered — it changes nothing. Do NOT claim you changed or fixed it. If the user's ` +
+            `request cannot be satisfied by changing the component spec (e.g. it concerns how the component ` +
+            `renders, which you do not control), say so briefly and honestly in "reply" and return an empty ` +
+            `emissions array. Otherwise, emit a genuinely different spec that addresses the request.`,
+        });
+        continue;
+      }
+      const noopSet = new Set(result.noops);
+      const cleaned = result.validated.filter(
+        (v) => !(v.kind === 'a2ui' && noopSet.has(v.targetSurfaceId as string)),
+      );
+      return { ok: true, validated: cleaned, rationale: envelope.rationale, reply: envelope.reply };
     }
 
-    return {
-      ok: false,
-      status: 422,
-      body: { error: `Agent produced an invalid response after ${MAX_CORRECTIONS} correction attempts`, issues: result.issues },
-    };
+    return { ok: true, validated: result.validated, rationale: envelope.rationale, reply: envelope.reply };
   }
 }
 
@@ -177,7 +202,11 @@ async function generate(system: string, messages: ModelMessage[]): Promise<Envel
 
 interface ProcessResult {
   validated: Array<Record<string, unknown>>;
+  /** Hard failures (malformed graph / unknown surface) — block the response. */
   issues: string[];
+  /** Existing surfaceIds whose updateComponents is identical to what's already
+   *  rendered (a no-op). The agent claimed a change it didn't actually make. */
+  noops: string[];
 }
 
 /** Validates + normalizes raw emissions: mints/injects surfaceIds, checks the
@@ -185,6 +214,7 @@ interface ProcessResult {
 function processEmissions(emissions: Array<Record<string, unknown>>, ctx: AgentContext): ProcessResult {
   const validated: Array<Record<string, unknown>> = [];
   const issues: string[] = [];
+  const noops: string[] = [];
   let lastSurfaceId: string | null = null;
 
   const knownSurfaces = new Set(Object.keys(ctx.surfaces ?? {}));
@@ -209,13 +239,46 @@ function processEmissions(emissions: Array<Record<string, unknown>>, ctx: AgentC
       const processed = a2uiMsgs.map((msg) => injectSurfaceId(msg, targetId));
       issues.push(...validateComponentReferences(processed));
       validated.push({ kind: 'a2ui', targetSurfaceId: targetId, messages: processed });
+
+      // No-op detection: an updateComponents on an existing surface whose
+      // components are identical to what's already rendered changes nothing.
+      if (!isPlaceholder && !hasCreate && knownSurfaces.has(declared)) {
+        const live = ctx.surfaces?.[declared]?.components;
+        const updates = processed.filter((m) => 'updateComponents' in m);
+        const allNoop =
+          updates.length > 0 &&
+          updates.every((m) =>
+            sameComponentSet(live, (m.updateComponents as Record<string, unknown>).components),
+          );
+        if (allNoop) noops.push(declared);
+      }
     } else if (em.kind === 'pageOp') {
       const op = resolvePlaceholders((em.op ?? {}) as Record<string, unknown>, ctx, lastSurfaceId);
       validated.push({ kind: 'pageOp', op });
     }
   }
 
-  return { validated, issues };
+  return { validated, issues, noops };
+}
+
+/** Id-keyed deep comparison of two A2UI component arrays (order-independent,
+ *  matching the diff engine's id-based semantics). */
+function sameComponentSet(prev: unknown, next: unknown): boolean {
+  if (!Array.isArray(prev) || !Array.isArray(next)) return false;
+  const byId = (arr: unknown[]): Map<string, unknown> => {
+    const m = new Map<string, unknown>();
+    for (const c of arr) {
+      if (c && typeof c === 'object' && 'id' in c) m.set(String((c as { id: unknown }).id), c);
+    }
+    return m;
+  };
+  const a = byId(prev);
+  const b = byId(next);
+  if (a.size !== b.size) return false;
+  for (const [id, comp] of a) {
+    if (!b.has(id) || !deepEqual(comp, b.get(id))) return false;
+  }
+  return true;
 }
 
 let surfaceCounter = 0;
@@ -316,6 +379,7 @@ function getDefaultContext(): AgentContext {
     recentPinnedSurfaceId: null,
     mostRecentSurfaceId: null,
     activeTabId: 'tickets',
+    diagnostics: [],
   };
 }
 

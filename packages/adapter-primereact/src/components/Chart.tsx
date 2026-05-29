@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
 import { Chart as PrimeChart } from 'primereact/chart';
-import { useAction } from '@arete-ui/core';
+import { useAction, useReportDiagnostics, type DiagnosticInput } from '@arete-ui/core';
 
 const actionSchema = z.object({
   event: z.object({
@@ -44,6 +44,25 @@ const DEFAULT_COLORS = [
 export const Chart = createComponentImplementation(ChartApi, ({ props, context }) => {
   const dispatchAction = useAction({ sourceComponentId: context.componentModel.id });
   const action = props.action;
+
+  // Report spec-level rendering problems back to the agent loop so it can
+  // self-correct (these are fixable by changing the emitted spec).
+  const diagnostics: DiagnosticInput[] = [];
+  if (props.labels.length !== props.data.length) {
+    diagnostics.push({
+      severity: 'warning',
+      code: 'chart.labels-data-mismatch',
+      message: `Chart has ${props.labels.length} labels but ${props.data.length} data values; they must be equal-length or bars/segments render unlabeled or missing.`,
+    });
+  }
+  if (props.data.length === 0) {
+    diagnostics.push({
+      severity: 'warning',
+      code: 'chart.no-data',
+      message: 'Chart has no data values, so nothing renders. Provide a non-empty data array.',
+    });
+  }
+  useReportDiagnostics(context.componentModel.id, diagnostics);
 
   const colors =
     props.colors && props.colors.length > 0

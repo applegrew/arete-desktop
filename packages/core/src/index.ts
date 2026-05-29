@@ -29,6 +29,17 @@ export type {
   AgentContextSnapshot,
   BuildAgentContextInput,
 } from './agent/context';
+export { RenderDiagnosticsStore } from './diagnostics/RenderDiagnosticsStore';
+export type {
+  RenderDiagnostic,
+  DiagnosticInput,
+  DiagnosticSeverity,
+} from './diagnostics/RenderDiagnosticsStore';
+export {
+  RenderDiagnosticsProvider,
+  useRenderDiagnosticsStore,
+  useReportDiagnostics,
+} from './diagnostics/RenderDiagnosticsContext';
 
 export type {
   HookContextValue,
@@ -88,6 +99,7 @@ export type {
 export { regionIds, toGridStyle } from './page/layout-descriptor';
 
 export { uid } from './util/id';
+export { deepEqual } from './util/deep-equal';
 
 export { Page } from './page/Page';
 export type { PageProps } from './page/Page';

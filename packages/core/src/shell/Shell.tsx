@@ -8,6 +8,8 @@ import type { HookContextValue } from '../types/hooks';
 import { ActionHarnessProvider } from '../action/ActionHarnessContext';
 import type { ActionHarness } from '../action/ActionHarness';
 import type { PageOpsHarness } from '../harness/PageOpsHarness';
+import { RenderDiagnosticsProvider } from '../diagnostics/RenderDiagnosticsContext';
+import type { RenderDiagnosticsStore } from '../diagnostics/RenderDiagnosticsStore';
 
 export interface ShellTab {
   id: string;
@@ -38,6 +40,9 @@ export interface ShellProps {
   pendingByTabId?: Record<string, boolean>;
   /** Optional action harness. When provided, components using `useAction()` route through it. */
   actionHarness?: ActionHarness;
+  /** Optional render-diagnostics store. When provided, adapter components using
+   *  `useReportDiagnostics()` publish into it; the consumer surfaces them to the agent. */
+  renderDiagnostics?: RenderDiagnosticsStore;
   /**
    * Optional page-ops harness. When provided, the Shell auto-switches to the
    * tab hosting a page whenever a page op targets a page that isn't mounted —
@@ -63,6 +68,7 @@ export function Shell({
   pendingByTabId,
   actionHarness,
   harness,
+  renderDiagnostics,
 }: ShellProps) {
   const store = useMemo(() => chatStore ?? new ChatStore(), [chatStore]);
 
@@ -137,6 +143,7 @@ export function Shell({
   return (
     <HookProvider hooks={hooks}>
       <ActionHarnessProvider harness={actionHarness}>
+      <RenderDiagnosticsProvider store={renderDiagnostics}>
       <div
         style={{
           display: 'flex',
@@ -182,6 +189,7 @@ export function Shell({
           </main>
         </div>
       </div>
+      </RenderDiagnosticsProvider>
       </ActionHarnessProvider>
     </HookProvider>
   );

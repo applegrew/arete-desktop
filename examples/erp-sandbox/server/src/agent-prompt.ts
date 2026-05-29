@@ -1,4 +1,4 @@
-import type { AgentContextSnapshot, SurfaceSnapshot, UserAction } from '@arete-ui/core';
+import type { AgentContextSnapshot, RenderDiagnostic, SurfaceSnapshot, UserAction } from '@arete-ui/core';
 
 /**
  * The agent context the client sends, minus the conversation `messages`
@@ -39,6 +39,22 @@ function renderRecentActions(actions?: UserAction[]): string {
     .join('\n');
 }
 
+function renderDiagnostics(diagnostics?: RenderDiagnostic[]): string {
+  if (!diagnostics || diagnostics.length === 0) return '(none)';
+  return diagnostics
+    .map(
+      (d) =>
+        `  [${d.severity}] ${d.surfaceId ?? '?'}/${d.componentId ?? '?'} (${d.code}): ${d.message}`,
+    )
+    .join('\n');
+}
+
+function renderComponentHints(hints?: Record<string, string>): string {
+  if (!hints || Object.keys(hints).length === 0) return '';
+  const lines = Object.entries(hints).map(([name, note]) => `- ${name}: ${note}`);
+  return `\nComponent rendering notes (how these components actually render — use them to avoid specs that render wrong):\n${lines.join('\n')}\n`;
+}
+
 function renderPages(pages?: AgentContext['pages']): string {
   if (!pages || Object.keys(pages).length === 0) return '  (no pages)';
   return Object.entries(pages)
@@ -70,6 +86,7 @@ Available components (arete-ui PrimeReact catalog):
   Chart segments ARE clickable when action is set. On click the framework dispatches the named event with auto-context {label, value, index} merged with any spec-declared context. Use this for drill-down: set action: {event: {name: "drillDown"}} (or any event name) and respond on the next turn when you see a [USER ACTION] prompt with that event name.
 
 The root component must have id="root". Wrap multiple children in a Column or Row.
+${renderComponentHints(ctx.componentHints)}
 
 CRITICAL — flat array with id references:
 A2UI components are a FLAT array. Parent components reference children by id string, but every id referenced in a "child" or "children" field MUST also exist as its own entry in the components array. If you reference an id that has no matching entry, the renderer shows "[Loading <id>...]" — this is a bug. Always emit a component definition for every id you reference.
@@ -100,6 +117,9 @@ ${renderSurfacesContext(ctx.surfaces)}
 
 Recent user actions (newest first). When the user issues a "[USER ACTION]" prompt, it corresponds to one of these dispatched events. Use this history to understand context like "the user just clicked Q1 then asked for more detail on that".
 ${renderRecentActions(ctx.recentActions)}
+
+Render diagnostics — problems the components reported about how your current spec actually rendered (this is your feedback on the rendered result, not just your emitted spec). If a diagnostic is listed for a surface the user is complaining about, FIX it by emitting a corrected spec. If the user reports a visual problem but NO diagnostic explains it, the issue may be in how the component renders (which you do not control) — say so honestly rather than re-emitting an identical spec.
+${renderDiagnostics(ctx.diagnostics)}
 
 ## Actionable components
 

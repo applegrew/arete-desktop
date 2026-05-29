@@ -13,6 +13,7 @@ import type { ChatStore } from '../chat/ChatStore';
 import type { ActionHarness } from '../action/ActionHarness';
 import type { UserAction } from '../types/hooks';
 import type { LayoutDescriptor } from '../page/layout-descriptor';
+import type { RenderDiagnostic, RenderDiagnosticsStore } from '../diagnostics/RenderDiagnosticsStore';
 import type { AgentMessage } from './transcript';
 
 /** A snapshot of one rendered surface for the agent to inspect. */
@@ -53,6 +54,10 @@ export interface AgentContextSnapshot {
   recentPinnedSurfaceId?: string | null;
   /** SurfaceIds that live in the chat scroll. */
   chatSurfaceIds: string[];
+  /** Structured render diagnostics reported by adapter components. */
+  diagnostics: RenderDiagnostic[];
+  /** Per-component agent-facing rendering notes from the catalog (componentName → note). */
+  componentHints?: Record<string, string>;
 }
 
 export interface BuildAgentContextInput {
@@ -60,6 +65,8 @@ export interface BuildAgentContextInput {
   chatStore: ChatStore;
   /** Source of recent user-action history. */
   actionHarness: ActionHarness;
+  /** Optional source of render diagnostics to surface to the agent. */
+  renderDiagnostics?: RenderDiagnosticsStore;
   /** Currently-rendered surfaces (consumer-assembled), keyed by surfaceId. */
   surfaces: Record<string, SurfaceSnapshot>;
   /** Per-page layout + mapping, keyed by pageId. */
@@ -75,6 +82,8 @@ export interface BuildAgentContextInput {
   includeThoughts?: boolean;
   /** Keep only the last N user actions (default 10). */
   actionLimit?: number;
+  /** Per-component agent-facing rendering notes (componentName → note). */
+  componentHints?: Record<string, string>;
 }
 
 /**
@@ -85,6 +94,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContextSn
   const {
     chatStore,
     actionHarness,
+    renderDiagnostics,
     surfaces,
     pages,
     activeTabId = null,
@@ -94,6 +104,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContextSn
     transcriptLimit = 20,
     includeThoughts = false,
     actionLimit = 10,
+    componentHints,
   } = input;
 
   return {
@@ -106,5 +117,7 @@ export function buildAgentContext(input: BuildAgentContextInput): AgentContextSn
     recentActions: actionHarness.getRecent(actionLimit),
     recentPinnedSurfaceId,
     chatSurfaceIds,
+    diagnostics: renderDiagnostics?.getAll() ?? [],
+    componentHints,
   };
 }
