@@ -275,3 +275,92 @@ The sandbox demonstrates: chat full-page on chat tab; chat docked on other tabs;
 ### Workspace
 - **Out-of-the-box catalogs beyond PrimeReact** — fw-dew adapter (Freshworks design system), MUI adapter, Ant Design adapter. Each is a new `packages/adapter-<name>` package wired to the same `@arete-ui/core` hooks.
 - **Persistence reference adapter** — the example sandbox has its own SQLite layer; extract a reusable `@arete-ui/persistence-rest` adapter so consumers don't have to roll their own.
+
+---
+
+## Roadmap & Vision (2026 pivot): from ERP reference app to A2UI-native chat product
+
+> **Direction:** evolve arete-ui's flagship from the `erp-sandbox` example into a **self-hostable,
+> general-purpose chat product** — UX like Claude/Gemini chat — whose differentiator is that it is
+> **A2UI-based, so agents *mutate a persistent multi-surface workspace*, not just render rich inline
+> components**, with **every mutation gated by arete-ui's per-surface visual diff (approve/reject)**.
+> It adds **MCP** and **Skills** support via a stronger agentic loop. **The core design in this README
+> (Shell, Page, Visual Diff Engine, Page Ops harness) is kept as-is and becomes the *governance layer*.**
+
+### Why this pivot
+
+The diff-gated, agent-mutable workspace is more broadly valuable than ERP layout customization. Packaged
+as a chat product, it competes with mainstream AI chat UIs on familiarity while offering something none
+of them do: the agent can restructure a *durable* workspace, and the human approves each change visually.
+
+### Competitive cross-check (the landscape we build on, not against)
+
+The "agent mutates UI" space converged on **three complementary layers** — we combine them:
+
+| Layer | Standard | Role | Our stance |
+|---|---|---|---|
+| UI description | **A2UI** (Google, Apache-2.0) | Agent describes UI as data; client renders from a trusted catalog | **Already using** (core + adapters) |
+| Agent↔frontend loop | **AG-UI** (CopilotKit; broad framework support: LangGraph, CrewAI, Mastra, MS Agent Framework, Google ADK, PydanticAI) | Event stream: streaming text, tool calls, **state patches (RFC 6902)**, lifecycle, **`INTERRUPT` (HITL)** | **Adopt as transport** |
+| Tool-served UI | **MCP Apps / MCP-UI** (official MCP extension) | MCP servers return UI in sandboxed iframes | **Consume** (render in surfaces; later phase) |
+
+Frameworks/products surveyed: **CopilotKit** (spans all three, already pairs A2UI+AG-UI+MCP — but an SDK,
+not a product, and **no visual-diff governance**); **LibreChat / Open WebUI / assistant-ui / Open Canvas /
+Jan** (shipped chat products with MCP + artifacts, but **inline/artifact** generative UI — **no persistent
+agent-mutable workspace with approve/reject diffs**). **Skills** = **Anthropic Agent Skills (`SKILL.md`)**
+open standard (folder + `SKILL.md`; adopted across 30+ tools incl. Claude Code).
+
+**Moat:** nobody ships our exact product — a Claude/Gemini-style chat where the agent mutates a persistent
+workspace **gated by per-surface visual diffs**, A2UI-based, with MCP + Skills. AG-UI's coarse `INTERRUPT`
+is an action gate, not a per-surface visual shadow-diff; the **Visual Diff Engine + Page workspace remain
+the uncontested differentiator.** Loop, MCP, and Skills are solved by the ecosystem — we adopt, not rebuild.
+
+### Decisions
+
+1. **Transport/loop:** adopt **AG-UI**; route its UI/state events through arete-ui's existing **Diff Engine**.
+2. **Agent runtime:** **Vercel AI SDK** (already a dep) + an AG-UI adapter; MCP client + multi-step tool calling.
+3. **Product shape:** **self-hostable OSS product** on arete-ui core (replaces `erp-sandbox` as flagship; the
+   sandbox is demoted to a test fixture/example).
+4. **Skills (v1):** **Anthropic Agent Skills (`SKILL.md`)** instruction/resource bundles loaded into context.
+
+### Target architecture — AG-UI is the seam
+
+```
+arete-ui (this repo): chat product + core (UNCHANGED moat: Shell · Page · Visual Diff Engine · Page Ops)
+        ▲  AG-UI client (grow the existing `ingest()` into an AG-UI ingest adapter)
+        │  AG-UI event stream (SSE/WS)
+        ▼
+Agent runtime (v1: in-repo `packages/agent`; FUTURE: standalone `arete-agent` service)
+        Vercel AI SDK loop · MCP client(s) · SKILL.md loader · emits A2UI surfaces + pageOps + state deltas
+```
+
+**AG-UI event → arete-ui pipeline** (the core technical mapping):
+- `TEXT_MESSAGE_*` → chat scroll (`ChatStore`).
+- A2UI surface emissions → `DiffRouter.route(...)` into the **shadow** model; pinned surfaces gated via
+  `router.gateSurface(...)` → approve/reject overlay.
+- Page ops → `PageOpsHarness.apply(...)` (already diff-gated; auto-switches to the target tab).
+- `STATE_SNAPSHOT` / `STATE_DELTA` (RFC 6902) → workspace state, diffable before commit.
+- `TOOL_CALL_*` → tool status in chat; `INTERRUPT` → mapped to an approve/reject gate.
+
+### Phased roadmap
+
+- **Phase 0 — PoC:** AG-UI ingest adapter in core (grow `ingest()`) mapping the above into the Diff Engine;
+  a minimal Vercel-AI-SDK AG-UI backend wired to one MCP server + one `SKILL.md`. Prove the full loop:
+  agent mutates a surface → visual diff → approve/reject; one MCP tool call; one skill applied.
+- **Phase 1 — chat product:** chat-first app on arete-ui core (multi-conversation, persistence, auth,
+  settings). Becomes the flagship.
+- **Phase 2 — MCP + Skills as features:** MCP server config/connection UI; Skills install/enable UI; render
+  **MCP Apps/MCP-UI** resources inside arete surfaces.
+
+### Future scope (TODO)
+
+- **`arete-agent`** — extract the agent runtime into a standalone service/library in its own repo that runs
+  agents **HITL *or* headless**, consumed by this product over **AG-UI**. The AG-UI seam is chosen so this
+  swap is clean.
+- **Sandboxed skill *script* execution** (beyond instruction bundles) with an exec/security model.
+- **Multi-agent (A2A)** coordination; richer MCP-UI surface embedding.
+
+### Reuse (do not rebuild)
+
+Moat unchanged (`shell/`, `page/`, `harness/`, `diff/`). Agent-loop scaffold already built — `agent/transcript.ts`,
+`agent/contract.ts`, `agent/context.ts`, `diagnostics/*`, and the server's no-op/diagnostic/correction loop —
+**migrates onto** the AG-UI backend rather than being discarded. `ingest()` becomes the AG-UI client entry point.
