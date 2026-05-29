@@ -32,7 +32,8 @@ import {
   saveChat,
   appendApproval,
 } from './persistence';
-import { getAgentHealth, postAgent } from './agent-client';
+import { getAgentHealth } from './agent-client';
+import { streamAgent } from './agui-client';
 
 const TICKETS_LAYOUT: LayoutDescriptor = {
   kind: 'grid',
@@ -374,33 +375,44 @@ export function App() {
           : allMessages;
 
       const askingEntry = chatStore.push({ role: 'system', text: 'Asking agent...' });
+      let clearedAsking = false;
+      const clearAsking = () => {
+        if (clearedAsking) return;
+        clearedAsking = true;
+        chatStore.remove(askingEntry.id);
+      };
       try {
-        const { emissions, rationale, reply } = await postAgent(text, agentContext, priorMessages);
-        chatStore.remove(askingEntry.id);
-        if (rationale) {
-          chatStore.push({ role: 'thought', text: rationale });
-        }
-        if (reply) {
-          chatStore.push({ role: 'agent', text: reply });
-        }
-        for (const em of emissions) {
-          if (em.kind === 'a2ui') {
-            const targetId = em.targetSurfaceId as string;
-            const messages = em.messages as unknown[];
-            const isPinned = targetId && pinnedSurfaceIdsRef.current.has(targetId);
-            if (diffsGated && isPinned) router.gateSurface(targetId);
-            captureSurfaceContents(messages);
-            router.route(messages as never);
-            chatStore.push({
-              role: 'agent',
-              surfaceId: targetId,
-            });
-          } else if (em.kind === 'pageOp') {
-            harness.apply(em.op as never);
-          }
-        }
+        // Stream the turn over AG-UI; the decoder hands us normalized results,
+        // which we route through the SAME Diff pipeline as before.
+        await streamAgent(text, priorMessages, agentContext, {
+          onTextEnd: ({ messageId, text: msgText }) => {
+            clearAsking();
+            if (!msgText) return;
+            // The backend tags rationale with a "thinking:" messageId prefix.
+            chatStore.push({ role: messageId.startsWith('thinking:') ? 'thought' : 'agent', text: msgText });
+          },
+          onEmission: (emission) => {
+            clearAsking();
+            if (emission.kind === 'a2ui') {
+              const targetId = emission.targetSurfaceId;
+              const messages = emission.messages as unknown[];
+              const isPinned = targetId && pinnedSurfaceIdsRef.current.has(targetId);
+              if (diffsGated && isPinned) router.gateSurface(targetId);
+              captureSurfaceContents(messages);
+              router.route(messages as never);
+              chatStore.push({ role: 'agent', surfaceId: targetId });
+            } else if (emission.kind === 'pageOp') {
+              harness.apply(emission.op as never);
+            }
+          },
+          onRunError: ({ message }) => {
+            clearAsking();
+            chatStore.push({ role: 'system', text: `Agent error: ${message}` });
+          },
+        });
+        clearAsking();
       } catch (err) {
-        chatStore.remove(askingEntry.id);
+        clearAsking();
         chatStore.push({
           role: 'system',
           text: `Agent error: ${(err as Error).message}`,

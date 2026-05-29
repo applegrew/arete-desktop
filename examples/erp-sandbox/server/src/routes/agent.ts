@@ -50,30 +50,36 @@ agentRouter.get('/health', async (_req: Request, res: Response) => {
   }
 });
 
+export interface AgentTurnRequest {
+  prompt: string;
+  messages?: AgentMessage[];
+  context?: AgentContext;
+}
+
+/**
+ * Runs one agent turn end-to-end (system prompt + history + correction loop) and
+ * returns the {@link AgentOutcome}. Shared by the JSON route (`/api/agent`) and
+ * the AG-UI streaming route (`/api/agui`).
+ */
+export async function runAgentTurn(body: AgentTurnRequest): Promise<AgentOutcome> {
+  const { prompt, messages, context } = body;
+  if (!prompt) {
+    return { ok: false, status: 400, body: { error: 'Missing prompt' } };
+  }
+  const ctx = context ?? getDefaultContext();
+  const systemPrompt = buildSystemPrompt(ctx);
+  // Thread prior conversation (history) + the current user prompt. The canonical
+  // system prompt is passed separately, so drop any system turns from the transcript.
+  const history: ModelMessage[] = (messages ?? [])
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+  const convo: ModelMessage[] = [...history, { role: 'user', content: prompt }];
+  return runAgentWithCorrection(systemPrompt, convo, ctx);
+}
+
 agentRouter.post('/', async (req: Request, res: Response) => {
   try {
-    const { prompt, messages, context } = req.body as {
-      prompt: string;
-      messages?: AgentMessage[];
-      context?: AgentContext;
-    };
-    if (!prompt) {
-      res.status(400).json({ error: 'Missing prompt' });
-      return;
-    }
-
-    const ctx = context ?? getDefaultContext();
-    const systemPrompt = buildSystemPrompt(ctx);
-
-    // Thread prior conversation (history) + the current user prompt. The
-    // canonical system prompt is passed separately, so drop any system turns
-    // that leaked into the transcript.
-    const history: ModelMessage[] = (messages ?? [])
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-    const convo: ModelMessage[] = [...history, { role: 'user', content: prompt }];
-
-    const outcome = await runAgentWithCorrection(systemPrompt, convo, ctx);
+    const outcome = await runAgentTurn(req.body as AgentTurnRequest);
     if (!outcome.ok) {
       res.status(outcome.status).json(outcome.body);
       return;
@@ -91,7 +97,7 @@ agentRouter.post('/', async (req: Request, res: Response) => {
 /** Max corrective re-asks (shared budget across parse + domain failures). */
 const MAX_CORRECTIONS = 2;
 
-type AgentOutcome =
+export type AgentOutcome =
   | { ok: true; validated: Array<Record<string, unknown>>; rationale?: string; reply?: string }
   | { ok: false; status: number; body: Record<string, unknown> };
 

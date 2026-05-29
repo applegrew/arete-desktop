@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ag-ui/core": "^0.0.54",
     "@arete-ui/core": "workspace:*",
     "ai": "^6.0.0",
     "better-sqlite3": "^11.0.0",

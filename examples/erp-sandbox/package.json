@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@arete-ui/adapter-primereact": "workspace:*",
+    "@arete-ui/agui": "workspace:*",
     "@arete-ui/core": "workspace:*",
     "@a2ui/markdown-it": "^0.0.4",
     "@a2ui/react": "^0.10.0",

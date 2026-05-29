@@ -38,6 +38,9 @@ importers:
       '@arete-ui/adapter-primereact':
         specifier: workspace:*
         version: link:../../packages/adapter-primereact
+      '@arete-ui/agui':
+        specifier: workspace:*
+        version: link:../../packages/agui
       '@arete-ui/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -72,6 +75,9 @@ importers:
 
   examples/erp-sandbox/server:
     dependencies:
+      '@ag-ui/core':
+        specifier: ^0.0.54
+        version: 0.0.54
       '@arete-ui/core':
         specifier: workspace:*
         version: link:../../../packages/core
@@ -156,6 +162,25 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
+  packages/agui:
+    dependencies:
+      '@ag-ui/core':
+        specifier: ^0.0.54
+        version: 0.0.54
+    devDependencies:
+      '@arete-ui/core':
+        specifier: workspace:*
+        version: link:../core
+      tsup:
+        specifier: ^8.3.5
+        version: 8.5.1(postcss@8.5.15)(tsx@4.22.3)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@25.9.1)(jsdom@25.0.1)
+
   packages/core:
     devDependencies:
       '@a2ui/react':
@@ -209,6 +234,9 @@ packages:
 
   '@a2ui/web_core@0.10.0':
     resolution: {integrity: sha512-pSieKxaB6aZWBL2LjZfKo4/1v4xMWylczpzte1ehuGH0kfNGf/iTd73PKsIKYx3b0FNWTbD8gAloOM4JCVqUig==}
+
+  '@ag-ui/core@0.0.54':
+    resolution: {integrity: sha512-Ilx31OvRQaZfU7jSArGqz06JZKOsAt8zWiCPJljyp9zR6Tzl18oyfx8o6FsuGfAktGRe50GI9SCCxNXXysZwtA==}
 
   '@ai-sdk/gateway@3.0.121':
     resolution: {integrity: sha512-uY248djJRxa5W68MHiyqO8WLdOeKQoRClGg7PVX/VPhVW8SJNM7/l5DcrA5WAM3YfQrLyNkgZa2VOu8T0t8LUw==}
@@ -2644,6 +2672,10 @@ snapshots:
       date-fns: 4.3.0
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
+
+  '@ag-ui/core@0.0.54':
+    dependencies:
+      zod: 3.25.76
 
   '@ai-sdk/gateway@3.0.121(zod@4.4.3)':
     dependencies:
