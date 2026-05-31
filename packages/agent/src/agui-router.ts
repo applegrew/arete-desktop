@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { EventType } from '@ag-ui/core';
 import { randomUUID } from 'node:crypto';
 import { runAgentTurn, agentHealth, type AgentTurnRequest, type AgentRuntimeOptions } from './run-turn';
+import { setMcpConfig } from './mcp-config';
 
 /** CUSTOM event name carrying an arete Emission — must match @arete-ui/agui's ARETE_EMISSION_EVENT. */
 const ARETE_EMISSION_EVENT = 'arete.emission';
@@ -15,8 +16,12 @@ const ARETE_EMISSION_EVENT = 'arete.emission';
  * arete UI mutations ride as CUSTOM "arete.emission" events (decoded client-side
  * by `@arete-ui/agui`); assistant text rides as native TEXT_MESSAGE_* events.
  */
-export function createAgentRouter(opts: AgentRuntimeOptions = {}): Router {
+export function createAgentRouter(opts: AgentRuntimeOptions & { mcp?: import('./mcp-config').McpConfig } = {}): Router {
   const router = Router();
+
+  if (opts.mcp) {
+    setMcpConfig(opts.mcp);
+  }
 
   router.get('/health', async (_req: Request, res: Response) => {
     res.json(await agentHealth(opts));

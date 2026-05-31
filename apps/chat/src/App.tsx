@@ -384,9 +384,12 @@ export function App() {
       };
       try {
         await streamAgent(text, priorMessages, agentContext, {
-          onToolCallStart: ({ toolCallName }) => {
+          onToolCallStart: ({ toolCallName, toolCallId }) => {
             clearAsking();
-            chatStore.push({ role: 'system', text: `🔧 Called MCP tool: ${toolCallName ?? 'tool'}` });
+            chatStore.push({ role: 'tool', toolName: toolCallName, toolResult: undefined, id: toolCallId });
+          },
+          onToolResult: ({ toolCallId, content }) => {
+            chatStore.push({ role: 'tool', toolName: toolCallId, toolResult: content });
           },
           onTextEnd: ({ messageId, text: msgText }) => {
             clearAsking();

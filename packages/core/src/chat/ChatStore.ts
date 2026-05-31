@@ -6,13 +6,17 @@ import {
   type TranscriptOptions,
 } from '../agent/transcript';
 
-export type ChatRole = 'user' | 'agent' | 'system' | 'thought';
+export type ChatRole = 'user' | 'agent' | 'system' | 'thought' | 'tool';
 
 export interface ChatEntry {
   id: string;
   role: ChatRole;
   text?: string;
   surfaceId?: string;
+  /** Tool name (present when role === 'tool'). */
+  toolName?: string;
+  /** Tool result content (present when role === 'tool'). */
+  toolResult?: string;
   createdAt: number;
 }
 

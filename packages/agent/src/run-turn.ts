@@ -3,7 +3,7 @@ import { createOllama } from 'ollama-ai-provider-v2';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { deepEqual, type AgentMessage } from '@arete-ui/core';
-import { buildSystemPrompt, type AgentContext } from './prompt';
+import { buildSystemPrompt, type AgentContext, type McpToolInfo } from './prompt';
 import { getMcpTools } from './mcp';
 import { loadSkills, renderSkillsForPrompt } from './skills';
 
@@ -98,8 +98,19 @@ export async function runAgentTurn(body: AgentTurnRequest, opts?: AgentRuntimeOp
   }
   const model = resolveModel(opts);
   const ctx = context ?? getDefaultContext();
+
+  // Discover MCP tools and extract their metadata for the prompt BEFORE building
+  // the system prompt — so the model knows what tools are available during the
+  // pre-step tool-calling phase.
+  const tools = await getMcpTools();
+  const toolInfos: McpToolInfo[] = Object.entries(tools).map(([name, t]) => ({
+    name,
+    description: t.description ?? name,
+    parameters: (t as { inputSchema?: Record<string, unknown> }).inputSchema,
+  }));
+
   // Skills (SKILL.md instruction bundles) are appended to the system prompt.
-  const systemPrompt = buildSystemPrompt(ctx) + renderSkillsForPrompt(loadSkills(opts?.skillsDir));
+  const systemPrompt = buildSystemPrompt(ctx, toolInfos.length > 0 ? toolInfos : undefined) + renderSkillsForPrompt(loadSkills(opts?.skillsDir));
 
   // Thread prior conversation (history) + current prompt. The canonical system
   // prompt is passed separately, so drop any system turns from the transcript.
@@ -112,7 +123,6 @@ export async function runAgentTurn(body: AgentTurnRequest, opts?: AgentRuntimeOp
   // then feed the tool conversation into the envelope step. Additive + failure-
   // tolerant — when no tools (or the model can't call them) this is skipped.
   const toolCalls: ToolCallRecord[] = [];
-  const tools = await getMcpTools();
   if (Object.keys(tools).length > 0) {
     try {
       const pre = await generateText({ model, system: systemPrompt, messages: convo, tools, stopWhen: stepCountIs(4) });

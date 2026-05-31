@@ -1,4 +1,5 @@
 import type React from 'react';
+import { useState } from 'react';
 import { useChatEntries, type ChatStore } from './ChatStore';
 
 export interface ChatSurfaceListProps {
@@ -85,6 +86,9 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
             </li>
           );
         }
+        if (entry.role === 'tool') {
+          return <ToolResultEntry key={entry.id} entry={entry} />;
+        }
         return (
           <li
             key={entry.id}
@@ -105,5 +109,63 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
         );
       })}
     </ol>
+  );
+}
+
+function ToolResultEntry({ entry }: { entry: { id: string; toolName?: string; toolResult?: string } }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <li
+      style={{
+        background: '#1a1e2e',
+        border: '1px solid #2d3350',
+        borderRadius: 6,
+        padding: '6px 10px',
+        fontSize: 12,
+        alignSelf: 'flex-start',
+        maxWidth: '85%',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: '#8b9cc7',
+          cursor: 'pointer',
+          fontSize: 12,
+          padding: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+          textAlign: 'left',
+        }}
+      >
+        <span style={{ fontSize: 10 }}>{expanded ? '▼' : '▶'}</span>
+        <span style={{ fontSize: 14, marginRight: 2 }}>🔧</span>
+        <span style={{ fontWeight: 600 }}>{entry.toolName ?? 'tool'}</span>
+      </button>
+      {expanded && (
+        <pre
+          style={{
+            margin: '6px 0 0 0',
+            padding: '4px 8px',
+            background: '#0d1117',
+            borderRadius: 4,
+            fontSize: 11,
+            color: '#7ee787',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+            maxHeight: 200,
+            overflowY: 'auto',
+          }}
+        >
+          {entry.toolResult ?? '(no result)'}
+        </pre>
+      )}
+    </li>
   );
 }

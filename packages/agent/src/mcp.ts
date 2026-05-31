@@ -1,66 +1,81 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { tool, type Tool } from 'ai';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { tool, jsonSchema, type Tool } from 'ai';
 import { z } from 'zod';
+import { getMcpConfig, type McpServerEntry } from './mcp-config';
 
-/**
- * Hermetic MCP demo for the Phase-0 PoC: a real Model Context Protocol server +
- * client wired over an in-memory transport (no child process, no network), with
- * its tools adapted to Vercel AI SDK tools the agent loop can call. Proves "MCP
- * support" end-to-end without external setup. A real deployment would point the
- * MCP client at remote/stdio servers instead.
- */
-function buildServer(): McpServer {
-  const server = new McpServer({ name: 'erp-mcp', version: '0.0.1' });
-  // One tool: live ticket counts. Distinct numbers so we can SEE the agent used
-  // the tool result (vs. inventing its own) in the rendered chart.
-  server.registerTool(
-    'get_ticket_stats',
-    {
-      description:
-        'Returns the current ticket counts by status (open, pending, resolved, closed) from the ERP system. Use this before building any ticket chart so the numbers are real.',
+function isHttpConfig(e: McpServerEntry): e is { url: string; transport: 'streamable-http' | 'sse' } {
+  return 'url' in e;
+}
+
+async function connectServer(name: string, entry: McpServerEntry): Promise<Client> {
+  const client = new Client({ name: `arete-${name}`, version: '0.0.1' });
+
+  if (isHttpConfig(entry)) {
+    if (entry.transport === 'streamable-http') {
+      const transport = new StreamableHTTPClientTransport(new URL(entry.url));
+      await client.connect(transport);
+    } else {
+      const transport = new SSEClientTransport(new URL(entry.url));
+      await client.connect(transport);
+    }
+  } else {
+    const transport = new StdioClientTransport({
+      command: entry.command,
+      args: entry.args,
+      env: entry.env,
+    });
+    await client.connect(transport);
+  }
+
+  return client;
+}
+
+function adaptTool(t: { name: string; description?: string; inputSchema: Record<string, unknown> }, client: Client): Tool {
+  const hasParams = t.inputSchema && typeof t.inputSchema === 'object' && 'properties' in t.inputSchema;
+  return tool({
+    description: t.description ?? t.name,
+    inputSchema: hasParams ? jsonSchema(t.inputSchema as Record<string, unknown>) : z.object({}),
+    execute: async (args: unknown) => {
+      const res = await client.callTool({
+        name: t.name,
+        arguments: (args as Record<string, unknown>) ?? {},
+      });
+      const content = (res.content ?? []) as Array<{ type?: string; text?: string }>;
+      return content
+        .filter((c) => c.type === 'text')
+        .map((c) => c.text ?? '')
+        .join('\n');
     },
-    async () => ({
-      content: [
-        { type: 'text', text: JSON.stringify({ open: 17, pending: 6, resolved: 25, closed: 41 }) },
-      ],
-    }),
-  );
-  return server;
+  });
 }
 
 let toolsPromise: Promise<Record<string, Tool>> | null = null;
 
 async function init(): Promise<Record<string, Tool>> {
-  const server = buildServer();
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverTransport);
+  const config = getMcpConfig();
+  const servers = Object.entries(config.mcpServers);
+  if (servers.length === 0) return {};
 
-  const client = new Client({ name: 'erp-mcp-client', version: '0.0.1' });
-  await client.connect(clientTransport);
+  const allTools: Record<string, Tool> = {};
 
-  const { tools } = await client.listTools();
-  const adapted: Record<string, Tool> = {};
-  for (const t of tools) {
-    adapted[t.name] = tool({
-      description: t.description ?? t.name,
-      // The demo tool takes no args; general JSON-Schema→zod mapping is future scope.
-      inputSchema: z.object({}),
-      execute: async () => {
-        const res = await client.callTool({ name: t.name, arguments: {} });
-        const content = (res.content ?? []) as Array<{ type?: string; text?: string }>;
-        return content
-          .filter((c) => c.type === 'text')
-          .map((c) => c.text ?? '')
-          .join('\n');
-      },
-    });
+  for (const [name, entry] of servers) {
+    try {
+      const client = await connectServer(name, entry);
+      const { tools } = await client.listTools();
+      for (const t of tools) {
+        allTools[t.name] = adaptTool(t, client);
+      }
+    } catch (err) {
+      console.error(`[mcp] server "${name}" connection failed:`, err);
+    }
   }
-  return adapted;
+
+  return allTools;
 }
 
-/** Lazily initialized, failure-tolerant MCP toolset (empty if init fails). */
 export function getMcpTools(): Promise<Record<string, Tool>> {
   if (!toolsPromise) {
     toolsPromise = init().catch((err) => {

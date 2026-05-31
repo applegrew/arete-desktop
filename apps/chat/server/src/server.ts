@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAgentRouter } from '@arete-ui/agent';
+import { createAgentRouter, loadMcpConfig } from '@arete-ui/agent';
 import { pagesRouter } from './routes/pages';
 import { surfacesRouter } from './routes/surfaces';
 import { chatRouter } from './routes/chat';
@@ -20,7 +20,8 @@ app.use('/api/surfaces', surfacesRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/state', stateRouter);
 // Stateless agent loop (AG-UI SSE + /health) from @arete-ui/agent.
-app.use('/api/agui', createAgentRouter({ skillsDir: join(__dirname, '..', 'skills'), model: 'gemma4:31b-cloud' }));
+const mcpConfig = loadMcpConfig();
+app.use('/api/agui', createAgentRouter({ skillsDir: join(__dirname, '..', 'skills'), model: 'gemma4:31b-cloud', mcp: mcpConfig }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 

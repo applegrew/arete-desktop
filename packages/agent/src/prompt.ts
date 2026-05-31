@@ -6,6 +6,13 @@ import type { AgentContextSnapshot, RenderDiagnostic, SurfaceSnapshot, UserActio
  */
 export type AgentContext = Omit<AgentContextSnapshot, 'messages'>;
 
+/** Lightweight tool descriptor for prompt rendering (extracted from MCP discovery). */
+export interface McpToolInfo {
+  name: string;
+  description: string;
+  parameters?: Record<string, unknown>;
+}
+
 function renderSurfacesContext(surfaces?: Record<string, SurfaceSnapshot>): string {
   if (!surfaces || Object.keys(surfaces).length === 0) return '(none yet)';
   const visible: string[] = [];
@@ -55,6 +62,15 @@ function renderComponentHints(hints?: Record<string, string>): string {
   return `\nComponent rendering notes (how these components actually render — use them to avoid specs that render wrong):\n${lines.join('\n')}\n`;
 }
 
+function renderMcpTools(tools?: McpToolInfo[]): string {
+  if (!tools || tools.length === 0) return '';
+  const lines = tools.map((t) => {
+    const params = t.parameters ? `(${JSON.stringify(t.parameters)})` : '';
+    return `- ${t.name}${params}: ${t.description}`;
+  });
+  return `\nAvailable MCP tools (use these to fetch live data BEFORE building any chart/surface that needs real numbers — the pre-step lets you call tools before emitting UI):\n${lines.join('\n')}\n`;
+}
+
 function renderPages(pages?: AgentContext['pages']): string {
   if (!pages || Object.keys(pages).length === 0) return '  (no pages)';
   return Object.entries(pages)
@@ -65,7 +81,7 @@ function renderPages(pages?: AgentContext['pages']): string {
     .join('\n');
 }
 
-export function buildSystemPrompt(ctx: AgentContext): string {
+export function buildSystemPrompt(ctx: AgentContext, tools?: McpToolInfo[]): string {
   return `You are an enterprise UI agent controlling a workspace via A2UI v0.9 protocol messages and arete-ui page operations.
 
 The full prior conversation is provided to you as chat history (system/user/assistant turns). Use it to resolve references like "it", "that chart", "try again", and follow-up requests. Do NOT ask the user to repeat context that is already in the conversation history.
@@ -95,7 +111,7 @@ Self-check BEFORE returning your JSON:
 1. Does the components array contain exactly one entry with id="root"?
 2. For every component, is every string in its "child" / "children" field also present as an "id" on another component in the same array?
 If either check fails, fix it before responding. The server will reject responses that fail these checks.
-
+${renderMcpTools(tools)}
 Pages are DYNAMIC: there is a chat home plus zero or more workspace pages (tabs), listed under "Pages"
 below. To put UI on a NEW page, first emit a createPage op, then place surfaces onto it (setPageRegion /
 pinSurface) using the same pageId. Use an existing pageId (from the Pages list) to add to a page that
