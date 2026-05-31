@@ -20,7 +20,7 @@ app.use('/api/surfaces', surfacesRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/state', stateRouter);
 // Stateless agent loop (AG-UI SSE + /health) from @arete-ui/agent.
-app.use('/api/agui', createAgentRouter({ skillsDir: join(__dirname, '..', 'skills') }));
+app.use('/api/agui', createAgentRouter({ skillsDir: join(__dirname, '..', 'skills'), model: 'gemma4:31b-cloud' }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 

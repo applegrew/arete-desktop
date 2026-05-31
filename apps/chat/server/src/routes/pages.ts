@@ -27,6 +27,8 @@ pagesRouter.post('/', (req, res) => {
   const page: PageRecord = {
     id,
     title: b.title ?? 'New page',
+    icon: b.icon,
+    color: b.color,
     layout: b.layout ?? defaultLayout(),
     mapping: b.mapping ?? {},
     position: b.position ?? store.listPages().length,
@@ -48,6 +50,8 @@ pagesRouter.patch('/:id', (req, res) => {
   const next: PageRecord = {
     ...cur,
     title: b.title ?? cur.title,
+    icon: 'icon' in b ? b.icon : cur.icon,
+    color: 'color' in b ? b.color : cur.color,
     layout: b.layout ?? cur.layout,
     mapping: b.mapping ?? cur.mapping,
     position: b.position ?? cur.position,

@@ -16,6 +16,8 @@ export interface ShellTab {
   label: string;
   icon: ReactNode;
   render: () => ReactNode;
+  /** Optional accent color for the tab button (CSS color value). Shown as a left-edge strip. */
+  color?: string;
   /**
    * Page ids hosted by this tab. Used to auto-switch tabs when a page op
    * targets a page on an inactive tab. Defaults to `[id]` (tab id === page id).
@@ -124,8 +126,8 @@ export function Shell({
 
   const allTabs: TabDef[] = useMemo(() => {
     const t: TabDef[] = [];
-    if (chatTab) t.push({ id: chatTab.tab.id, label: chatTab.tab.label, icon: chatTab.tab.icon });
-    for (const tab of tabs) t.push({ id: tab.id, label: tab.label, icon: tab.icon });
+    if (chatTab) t.push({ id: chatTab.tab.id, label: chatTab.tab.label, icon: chatTab.tab.icon, color: chatTab.tab.color });
+    for (const tab of tabs) t.push({ id: tab.id, label: tab.label, icon: tab.icon, color: tab.color });
     return t;
   }, [tabs, chatTab]);
 

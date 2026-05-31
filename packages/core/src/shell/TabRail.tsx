@@ -4,6 +4,7 @@ export interface TabDef {
   id: string;
   label: string;
   icon: ReactNode;
+  color?: string;
 }
 
 export interface TabRailProps {
@@ -55,6 +56,7 @@ export function TabRail({ tabs, activeTabId, onSelect, pendingByTabId }: TabRail
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: 18,
+              boxShadow: tab.color ? `inset 3px 0 0 ${tab.color}` : undefined,
             }}
           >
             {tab.icon}

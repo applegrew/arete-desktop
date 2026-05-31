@@ -102,7 +102,8 @@ pinSurface) using the same pageId. Use an existing pageId (from the Pages list) 
 already exists. pageId is a short slug you choose (e.g. "reports"); title is the human label.
 
 Available page operations:
-- createPage: { name:"createPage", pageId:"<newPageId>", title:"<Human Title>", layout?:{ kind:"grid", rows:number, cols:number, regions:[{id:string},...] } }
+- createPage: { name:"createPage", pageId:"<newPageId>", title:"<Human Title>", icon?:"emoji", color?:"#hex", layout?:{ kind:"grid", rows:number, cols:number, regions:[{id:string},...] } }
+- setPageProps: { name:"setPageProps", pageId:"<existingPageId>", title?:"string", icon?:"emoji", color?:"#hex" }
 - pinSurface: { name:"pinSurface", surfaceId:"<chatSurfaceId>", pageId:"<pageId>", region?:string }
 - unpinSurface: { name:"unpinSurface", surfaceId:"<surfaceId>", pageId:"<pageId>" }
 - moveSurface: { name:"moveSurface", surfaceId:"<surfaceId>", pageId:"<pageId>", targetRegion:"<regionId>" }
@@ -156,13 +157,14 @@ Rules:
    - "it" / "this" / "that" / "the chart" / "the panel" → use the Most-recent surface from context above.
    - "the page" / "this page" / "current page" → use the Active tab if it is a workspace page. If the active tab is "chat" or no page exists yet, create one with createPage (pick a sensible pageId + title) and target it.
    - "top left" / "bottom right" etc → match against that page's layout regions (e.g. "top-left", "top-right", "bottom-left", "bottom-right", "left", "right").
-6. Page operation selection:
-   - **createPage**: create a NEW page (tab). Required before placing surfaces on a page that isn't in the Pages list. Default layout is a 2×2 grid (regions top-left/top-right/bottom-left/bottom-right) unless you pass one.
-   - **pinSurface**: place an UNPINNED surface on an EXISTING page. Use for "add X to the <page>" when X isn't yet in that page's mapping.
-   - **setPageRegion**: place a surface in a specific region (overwrites any existing there). Use for "put X in top-left" — works whether X is pinned or not.
-   - **moveSurface**: relocate a surface ALREADY in a page's mapping. Wrong choice for unpinned surfaces — will error.
-   - **unpinSurface**: remove from a page mapping (returns to chat scroll).
-   To "create a page and put a chart on it": emit createPage, then a2ui surface, then setPageRegion targeting the new pageId.
+ 6. Page operation selection:
+    - **createPage**: create a NEW page (tab). Required before placing surfaces on a page that isn't in the Pages list. Default layout is a 2×2 grid (regions top-left/top-right/bottom-left/bottom-right) unless you pass one.
+    - **setPageProps**: change an EXISTING page's title, icon (single emoji), or color (hex like "#3b82f6"). Use when the user asks to rename a tab, change its icon, or set its accent color. All fields are optional — only include what the user asked to change.
+    - **pinSurface**: place an UNPINNED surface on an EXISTING page. Use for "add X to the <page>" when X isn't yet in that page's mapping.
+    - **setPageRegion**: place a surface in a specific region (overwrites any existing there). Use for "put X in top-left" — works whether X is pinned or not.
+    - **moveSurface**: relocate a surface ALREADY in a page's mapping. Wrong choice for unpinned surfaces — will error.
+    - **unpinSurface**: remove from a page mapping (returns to chat scroll).
+    To "create a page and put a chart on it": emit createPage, then a2ui surface, then setPageRegion targeting the new pageId.
 7. The pageOp's surfaceId should be the actual existing surfaceId (e.g. agent-sfc-1), NOT "<PLACEHOLDER>", unless you're creating a brand-new surface in the same response.
 8. Use Card+Column for grouped content. Keep text concise.
 9. Surface ID convention: "<PLACEHOLDER>" means "give me a fresh surface" — server mints a new ID. To target an existing surface, use its actual ID from the workspace state below.

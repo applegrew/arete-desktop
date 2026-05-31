@@ -12,6 +12,10 @@ async function jfetch<T>(url: string, init?: RequestInit): Promise<T> {
 export interface ApiPage {
   id: string;
   title: string;
+  /** Emoji or text icon displayed on the tab. Defaults to 📄. */
+  icon?: string;
+  /** Accent color shown as a left-edge strip on the tab button. */
+  color?: string;
   layout: LayoutDescriptor;
   mapping: Record<string, string>;
   position: number;

@@ -140,13 +140,15 @@ export function App() {
 
   // --- dynamic page roster -------------------------------------------------
   const createPageLocal = useCallback(
-    (opts: { id?: string; title?: string; layout?: LayoutDescriptor }): string => {
+    (opts: { id?: string; title?: string; layout?: LayoutDescriptor; icon?: string; color?: string }): string => {
       const id = opts.id || uid('page');
       if (pagesRef.current.some((p) => p.id === id)) return id;
       const now = Date.now();
       const page: ApiPage = {
         id,
         title: opts.title || 'New page',
+        icon: opts.icon,
+        color: opts.color,
         layout: opts.layout || DEFAULT_LAYOUT,
         mapping: {},
         position: pagesRef.current.length,
@@ -402,11 +404,17 @@ export function App() {
               router.route(messages as never);
               chatStore.push({ role: 'agent', surfaceId: targetId });
             } else if (emission.kind === 'pageOp') {
-              const op = emission.op as { name: string; pageId?: string; title?: string; layout?: LayoutDescriptor };
+              const op = emission.op as { name: string; pageId?: string; title?: string; icon?: string; color?: string; layout?: LayoutDescriptor };
               if (op.name === 'createPage') {
-                createPageLocal({ id: op.pageId, title: op.title, layout: op.layout });
+                createPageLocal({ id: op.pageId, title: op.title, layout: op.layout, icon: op.icon, color: op.color });
               } else if (op.name === 'deletePage' && op.pageId) {
                 deletePageLocal(op.pageId);
+              } else if (op.name === 'setPageProps' && op.pageId) {
+                const patch: Record<string, unknown> = {};
+                if (op.title !== undefined) patch.title = op.title;
+                if (op.icon !== undefined) patch.icon = op.icon;
+                if (op.color !== undefined) patch.color = op.color;
+                if (Object.keys(patch).length) updatePageLocal(op.pageId, patch);
               } else {
                 harness.apply(op as never);
               }
@@ -433,6 +441,7 @@ export function App() {
       liveProcessor,
       captureSurfaceContents,
       createPageLocal,
+      updatePageLocal,
       deletePageLocal,
       shellState.activeTabId,
     ],
@@ -468,7 +477,8 @@ export function App() {
   const tabs: ShellTab[] = pages.map((p) => ({
     id: p.id,
     label: p.title,
-    icon: <span>📄</span>,
+    icon: <span>{p.icon || '📄'}</span>,
+    color: p.color,
     render: () => (
       <Page
         pageId={p.id}

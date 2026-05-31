@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-**arete-ui** is a React framework that lets end-users reshape their enterprise application UI through natural-language conversation with an agent, with every change gated by a visual diff before it commits. It is deliberately small: arete-ui ships an app **Shell**, a multi-surface **Page** workspace, a **Chat** panel, a **Visual Diff Engine**, and a **Page Operations Harness** that gives the agent typed, structural control of the workspace. Everything else — components, theming, the agent, auth, data, persistence — is plugged in from outside. The first reference plug-in is Freshworks' `fw-dew` design system, but arete-ui core has no dependency on it.
+**arete-ui** is a React framework that lets end-users reshape their enterprise application UI through natural-language conversation with an agent, with every change gated by a visual diff before it commits. It is deliberately small: arete-ui ships an app **Shell**, a multi-surface **Page** workspace, a **Chat** panel, a **Visual Diff Engine**, and a **Page Operations Harness** that gives the agent typed, structural control of the workspace. Everything else — components, theming, the agent, auth, data, persistence — is plugged in from outside. The first reference plug-in uses PrimeReact, but arete-ui core has no dependency on it.
 
 arete-ui builds on Google's **A2UI** (Agent-to-User Interface) v0.9 protocol and reuses A2UI's renderer and agent SDKs unchanged. Its net-new contribution is the shell pattern, the diff engine, and the structural-operation harness — none of which A2UI provides on its own.
 
@@ -173,7 +173,7 @@ Exposed at the Shell level, threaded through every component and the harness:
 
 ### Pluggable surface (everything else lives outside)
 
-- **Catalog**: any A2UI v0.9 `Catalog` instance. Reference plug-in (separate package, not in core): `@arete-ui/adapter-dew` — maps `@freshworks/dew-components` to A2UI implementations via `createComponentImplementation` and ships `@freshworks/dew-styles` tokens as the theme. arete-ui core has zero fw-dew dependency.
+- **Catalog**: any A2UI v0.9 `Catalog` instance. Reference plug-in (separate package, not in core): `@arete-ui/adapter-primereact` — maps PrimeReact components to A2UI implementations via `createComponentImplementation`. arete-ui core has zero PrimeReact dependency.
 - **Agent / transport**: consumer brings the A2UI message stream (SSE / WebSocket / A2A / mock). arete-ui exposes `ingest(stream)`.
 - **Page roster**: consumer declares which tabs exist, their icons/labels, and what renders in each.
 - **Top-bar content**: consumer-owned React.
@@ -197,7 +197,7 @@ How agent output finds its destination:
 A local-first React SPA that demonstrates the full plug-in surface end-to-end. **Not** part of arete-ui core.
 
 - **Shell composition**: 1 chat tab + 2 workspace tabs (e.g., "Tickets", "Reports") using `<Page>`.
-- **Catalog plug-in**: `@arete-ui/adapter-dew`, consuming `@freshworks/dew-components` and `@freshworks/dew-styles`.
+- **Catalog plug-in**: `@arete-ui/adapter-primereact`, consuming `primereact` UI components.
 - **Mock agent**: emits canned `updateComponents` and page-op messages in response to a prompt fixture set:
   - *"Group approvals by urgency"*
   - *"Add an outstanding-invoices panel"*
@@ -214,7 +214,7 @@ The sandbox demonstrates: chat full-page on chat tab; chat docked on other tabs;
 
 - **Renderer primitives**: `renderers/react/src/v0_9/`, `renderers/web_core/src/v0_9/processing/message-processor.ts`, `renderers/web_core/src/v0_9/state/` (`SurfaceModel`, `SurfaceGroupModel`, `DataModel`, `ComponentsModel`).
 - **Streaming + multi-surface reference**: `samples/client/react/shell/`.
-- **Custom-component registration pattern** (for `@arete-ui/adapter-dew`, not core): `samples/client/lit/custom-components-example/`.
+- **Custom-component registration pattern** (for `@arete-ui/adapter-primereact`, not core): `samples/client/lit/custom-components-example/`.
 - **Theming reference**: `docs/guides/theming.md`, `renderers/react/src/v0_8/styles/` (CSS-var conventions).
 - **A2UI specification**: `specification/v0_9/docs/a2ui_protocol.md`, `specification/v0_9/json/client_capabilities.json`.
 - **Agent SDK reference**: `agent_sdks/agent_sdk_guide.md`, `agent_sdks/python/src/a2ui/`.
@@ -249,8 +249,8 @@ The sandbox demonstrates: chat full-page on chat tab; chat docked on other tabs;
 
 ### Workstream B: Reference plug-ins and sandbox
 
-11. `@arete-ui/adapter-dew` separate package: maps `@freshworks/dew-components` to A2UI implementations via `createComponentImplementation`; ships `@freshworks/dew-styles` tokens as the bundled theme.
-12. Catalog plug-in proof: swap BasicCatalog → `@arete-ui/adapter-dew` without touching arete-ui core; same prompt fixtures still render and diff correctly.
+11. `@arete-ui/adapter-primereact` separate package: maps `primereact` components to A2UI implementations via `createComponentImplementation`.
+12. Catalog plug-in proof: the same `@arete-ui/adapter-primereact` catalog is used in both the erp-sandbox and arete-chat apps without touching arete-ui core.
 13. `examples/erp-sandbox`: full Shell + Page + Chat + Diff loop with the prompt fixture set above. Mock agent + SQLite persistence demonstrate the hook wiring.
 14. Agent reply routing: prompt typed in docked chat on a non-chat tab — reply lands as a new surface in the chat scroll, NOT silently on the page.
 
@@ -274,7 +274,9 @@ The sandbox demonstrates: chat full-page on chat tab; chat docked on other tabs;
 
 ### Workspace
 - **Out-of-the-box catalogs beyond PrimeReact** — fw-dew adapter (Freshworks design system), MUI adapter, Ant Design adapter. Each is a new `packages/adapter-<name>` package wired to the same `@arete-ui/core` hooks.
-- **Persistence reference adapter** — the example sandbox has its own SQLite layer; extract a reusable `@arete-ui/persistence-rest` adapter so consumers don't have to roll their own.
+- **Persistence reference adapter** — the chat app and sandbox each have their own SQLite layer; extract a reusable `@arete-ui/persistence-rest` adapter so consumers don't have to roll their own.
+- **Agent support for deletePage** — user-driven page deletion works; agent-invoked `deletePage` page op is deferred.
+- **Persist pending (un-approved) diffs across reload** — shadow surface state is ephemeral; persist to survive browser refresh.
 
 ---
 
@@ -343,24 +345,43 @@ Agent runtime (v1: in-repo `packages/agent`; FUTURE: standalone `arete-agent` se
 
 ### Phased roadmap
 
-- **Phase 0 — PoC:** AG-UI ingest adapter in core (grow `ingest()`) mapping the above into the Diff Engine;
-  a minimal Vercel-AI-SDK AG-UI backend wired to one MCP server + one `SKILL.md`. Prove the full loop:
-  agent mutates a surface → visual diff → approve/reject; one MCP tool call; one skill applied.
-- **Phase 1 — chat product:** chat-first app on arete-ui core (multi-conversation, persistence, auth,
-  settings). Becomes the flagship.
-- **Phase 2 — MCP + Skills as features:** MCP server config/connection UI; Skills install/enable UI; render
-  **MCP Apps/MCP-UI** resources inside arete surfaces.
+| Phase | Status |
+|---|---|
+| Phase 0 — PoC | Done |
+| Phase 1 — Chat product | In progress (partial) |
+| Phase 2 — MCP + Skills | Upcoming |
+| Phase 3 — Standalone agent + advanced | Upcoming |
 
-### Future scope (TODO)
+- **Phase 0 — PoC** (done): AG-UI ingest adapter in core (`@arete-ui/agui` → `AgUiDecoder`); Vercel AI SDK backend (`@arete-ui/agent` → `runAgentTurn`, `createAgentRouter`); one MCP server (in-memory `get_ticket_stats` via `@modelcontextprotocol/sdk`); one `SKILL.md` loaded into system prompt. Full loop proven: agent mutates a surface → visual diff → approve/reject.
+- **Phase 1 — Chat product** (in progress): `arete-chat` flagship app (`apps/chat`) with chat-first UX, dynamic page creation via agent, SQLite persistence (`better-sqlite3`), and the full arete-ui core lifecycle. **Deferred:** multi-conversation, auth/multi-user, settings UI.
+- **Phase 2 — MCP + Skills as features** (upcoming):
+  - MCP server config UI + connection management (connect real MCP servers; today hermetic in-memory demo tool only)
+  - Skills management UI — install/enable/disable SKILL.md skills (today filesystem-loaded)
+  - Render MCP Apps / MCP-UI resources inside arete surfaces (sandboxed iframes)
+- **Phase 3 — Standalone agent + advanced** (upcoming):
+  - Standalone `arete-agent` service (HITL and headless) consumed over AG-UI — `packages/agent` is the seam
+  - Sandboxed skill script execution (beyond instruction bundles) with an exec/security model
+  - Multi-agent (A2A) coordination
+  - Other RDBMS store implementations (e.g. Postgres) behind the existing `Store` interface
 
-- **`arete-agent`** — extract the agent runtime into a standalone service/library in its own repo that runs
-  agents **HITL *or* headless**, consumed by this product over **AG-UI**. The AG-UI seam is chosen so this
-  swap is clean.
-- **Sandboxed skill *script* execution** (beyond instruction bundles) with an exec/security model.
-- **Multi-agent (A2A)** coordination; richer MCP-UI surface embedding.
+### Seam / agent-loop polish (ongoing)
+
+- **Token-by-token streaming** — today the reply arrives whole as START→CONTENT→END; the decoder and wire format support streaming deltas but the agent emits full replies.
+- **AG-UI `STATE_SNAPSHOT` / `STATE_DELTA`** (RFC 6902) — decoder handles these events; pending: route through diff-gated workspace state.
+- **AG-UI `INTERRUPT`** — pending: map to the approve/reject gate.
+- **Multi-arg MCP tools** — JSON-Schema→zod conversion; the in-memory demo tool is no-arg only.
+
+### Phase 1 product gaps (deferred)
+
+- **Multi-conversation** — multiple chats; `threadId` field exists in AG-UI events but `ChatStore` is single-flat-list.
+- **Auth / multi-user** — single-user local today; no RBAC enforcement.
+- **Agent `deletePage`** — user-driven delete works; agent-invoked delete page op deferred.
+- **Persist pending (un-approved) diffs across reload** — shadow surface state is ephemeral.
+- **Auto-title pages/conversations** from the first prompt.
 
 ### Reuse (do not rebuild)
 
 Moat unchanged (`shell/`, `page/`, `harness/`, `diff/`). Agent-loop scaffold already built — `agent/transcript.ts`,
 `agent/contract.ts`, `agent/context.ts`, `diagnostics/*`, and the server's no-op/diagnostic/correction loop —
-**migrates onto** the AG-UI backend rather than being discarded. `ingest()` becomes the AG-UI client entry point.
+**migrates onto** the AG-UI backend rather than being discarded. `ingest()` remains the low-level A2UI message
+entry point; `@arete-ui/agui` (`AgUiDecoder`) is the AG-UI client entry point for streaming agent runs.

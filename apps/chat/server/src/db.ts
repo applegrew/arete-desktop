@@ -11,6 +11,8 @@ const DB_PATH = path.join(DATA_DIR, 'arete-chat.db');
 export interface PageRecord {
   id: string;
   title: string;
+  icon?: string;
+  color?: string;
   layout: unknown;
   mapping: Record<string, string>;
   position: number;
@@ -61,7 +63,8 @@ class SqliteStore implements Store {
     this.db.pragma('journal_mode = WAL');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS pages (
-        id TEXT PRIMARY KEY, title TEXT NOT NULL, layout_json TEXT NOT NULL,
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, icon TEXT, color TEXT,
+        layout_json TEXT NOT NULL,
         mapping_json TEXT NOT NULL, position INTEGER NOT NULL,
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
@@ -74,6 +77,13 @@ class SqliteStore implements Store {
       );
       CREATE TABLE IF NOT EXISTS app_state ( k TEXT PRIMARY KEY, v TEXT NOT NULL );
     `);
+    // Migration: add icon + color columns for existing databases.
+    for (const col of ['icon', 'color']) {
+      const has = this.db.prepare(`PRAGMA table_info(pages)`).all() as Array<{ name: string }>;
+      if (!has.some((c) => c.name === col)) {
+        this.db.exec(`ALTER TABLE pages ADD COLUMN ${col} TEXT`);
+      }
+    }
   }
 
   listPages(): PageRecord[] {
@@ -91,14 +101,17 @@ class SqliteStore implements Store {
   upsertPage(p: PageRecord): void {
     this.db
       .prepare(
-        `INSERT INTO pages (id, title, layout_json, mapping_json, position, created_at, updated_at)
-         VALUES (@id, @title, @layout, @mapping, @position, @createdAt, @updatedAt)
-         ON CONFLICT(id) DO UPDATE SET title=excluded.title, layout_json=excluded.layout_json,
+        `INSERT INTO pages (id, title, icon, color, layout_json, mapping_json, position, created_at, updated_at)
+         VALUES (@id, @title, @icon, @color, @layout, @mapping, @position, @createdAt, @updatedAt)
+         ON CONFLICT(id) DO UPDATE SET title=excluded.title, icon=excluded.icon, color=excluded.color,
+           layout_json=excluded.layout_json,
            mapping_json=excluded.mapping_json, position=excluded.position, updated_at=excluded.updated_at`,
       )
       .run({
         id: p.id,
         title: p.title,
+        icon: p.icon ?? null,
+        color: p.color ?? null,
         layout: JSON.stringify(p.layout),
         mapping: JSON.stringify(p.mapping ?? {}),
         position: p.position,
@@ -180,6 +193,8 @@ function rowToPage(r: Record<string, unknown>): PageRecord {
   return {
     id: r.id as string,
     title: r.title as string,
+    icon: (r.icon as string) ?? undefined,
+    color: (r.color as string) ?? undefined,
     layout: safeParse(r.layout_json as string, null),
     mapping: safeParse(r.mapping_json as string, {}),
     position: r.position as number,
