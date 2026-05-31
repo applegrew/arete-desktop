@@ -12,9 +12,13 @@ export interface GridLayout {
   regions: RegionSpec[];
 }
 
-export interface SplitLayout {
-  kind: 'split';
-  direction: 'row' | 'column';
+export interface RowLayout {
+  kind: 'row';
+  regions: RegionSpec[];
+}
+
+export interface ColumnLayout {
+  kind: 'column';
   regions: RegionSpec[];
 }
 
@@ -23,7 +27,7 @@ export interface DockLayout {
   regions: RegionSpec[];
 }
 
-export type LayoutDescriptor = GridLayout | SplitLayout | DockLayout;
+export type LayoutDescriptor = GridLayout | RowLayout | ColumnLayout | DockLayout;
 
 export function regionIds(layout: LayoutDescriptor): string[] {
   return layout.regions.map((r) => r.id);
@@ -53,10 +57,18 @@ export function toGridStyle(layout: LayoutDescriptor): React.CSSProperties {
         height: '100%',
       };
     }
-    case 'split':
+    case 'row':
       return {
         display: 'flex',
-        flexDirection: layout.direction,
+        flexDirection: 'row',
+        gap: 8,
+        width: '100%',
+        height: '100%',
+      };
+    case 'column':
+      return {
+        display: 'flex',
+        flexDirection: 'column',
         gap: 8,
         width: '100%',
         height: '100%',

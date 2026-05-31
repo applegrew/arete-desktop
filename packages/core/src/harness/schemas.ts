@@ -51,11 +51,17 @@ export const pageOpSchemas: Record<PageOpName, Record<string, unknown>> = {
           },
           {
             properties: {
-              kind: { const: 'split' },
-              direction: { enum: ['row', 'column'] },
+              kind: { const: 'row' },
               regions: { type: 'array', items: { $ref: '#/$defs/region' } },
             },
-            required: ['kind', 'direction', 'regions'],
+            required: ['kind', 'regions'],
+          },
+          {
+            properties: {
+              kind: { const: 'column' },
+              regions: { type: 'array', items: { $ref: '#/$defs/region' } },
+            },
+            required: ['kind', 'regions'],
           },
           {
             properties: {

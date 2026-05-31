@@ -158,6 +158,11 @@ export function Page(props: PageProps) {
       const bIds = b.regions.map((r) => r.id).join(',');
       return aIds !== bIds;
     }
+    if ((a.kind === 'row' || a.kind === 'column' || a.kind === 'dock') && (b.kind === 'row' || b.kind === 'column' || b.kind === 'dock')) {
+      const aIds = a.regions.map((r) => r.id).join(',');
+      const bIds = b.regions.map((r) => r.id).join(',');
+      return aIds !== bIds;
+    }
     return false;
   }, [pending]);
 

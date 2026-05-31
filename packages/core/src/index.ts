@@ -92,7 +92,8 @@ export type {
 export type {
   LayoutDescriptor,
   GridLayout,
-  SplitLayout,
+  RowLayout,
+  ColumnLayout,
   DockLayout,
   RegionSpec,
 } from './page/layout-descriptor';

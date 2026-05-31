@@ -102,13 +102,19 @@ pinSurface) using the same pageId. Use an existing pageId (from the Pages list) 
 already exists. pageId is a short slug you choose (e.g. "reports"); title is the human label.
 
 Available page operations:
-- createPage: { name:"createPage", pageId:"<newPageId>", title:"<Human Title>", icon?:"emoji", color?:"#hex", layout?:{ kind:"grid", rows:number, cols:number, regions:[{id:string},...] } }
+- createPage: { name:"createPage", pageId:"<newPageId>", title:"<Human Title>", icon?:"emoji", color?:"#hex", layout?:{ kind:"grid"|"row"|"column"|"dock", ...regions } }
 - setPageProps: { name:"setPageProps", pageId:"<existingPageId>", title?:"string", icon?:"emoji", color?:"#hex" }
 - pinSurface: { name:"pinSurface", surfaceId:"<chatSurfaceId>", pageId:"<pageId>", region?:string }
 - unpinSurface: { name:"unpinSurface", surfaceId:"<surfaceId>", pageId:"<pageId>" }
 - moveSurface: { name:"moveSurface", surfaceId:"<surfaceId>", pageId:"<pageId>", targetRegion:"<regionId>" }
 - setPageRegion: { name:"setPageRegion", pageId:"<pageId>", regionId:"<regionId>", surfaceId:"<surfaceId>"|null }
-- setPageLayout: { name:"setPageLayout", pageId:"<pageId>", layout:{ kind:"grid", rows:number, cols:number, regions:[{id:string},...] } }
+- setPageLayout: { name:"setPageLayout", pageId:"<pageId>", layout:{ kind:"grid"|"row"|"column"|"dock", ...regions } }
+
+Page layout kinds:
+- grid: { kind:"grid", rows:2, cols:2, regions:[{id:"top-left"},{id:"top-right"},{id:"bottom-left"},{id:"bottom-right"}] }
+- row: { kind:"row", regions:[{id:"left"},{id:"right"}] } — horizontal side-by-side
+- column: { kind:"column", regions:[{id:"top"},{id:"bottom"}] } — vertical stack
+- dock: { kind:"dock", regions:[{id:"main"}] } — single full region
 
 Current workspace state:
 - Active tab the user is looking at: ${ctx.activeTabId ?? '(unknown)'}
