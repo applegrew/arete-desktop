@@ -3,10 +3,24 @@ import {
   getMcpStatus,
   reconnectMcp,
   type AgentSettings,
+  type HttpServerConfig,
   type McpServerEntry,
   type McpServerSetting,
   type McpServerStatus,
 } from './persistence';
+
+/** Parse a "Key: Value" line-per-header textarea into a headers object (empty → undefined). */
+function parseHeaders(text: string): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const idx = line.indexOf(':');
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    if (key) out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 interface SettingsPanelProps {
   open: boolean;
@@ -68,12 +82,17 @@ const sectionTitle: React.CSSProperties = {
   paddingBottom: 4,
 };
 
-function isHttp(e: McpServerEntry): e is { url: string; transport: 'streamable-http' | 'sse' } {
+function isHttp(e: McpServerEntry): e is HttpServerConfig {
   return 'url' in e;
 }
 
 function describeEntry(e: McpServerEntry): string {
-  return isHttp(e) ? `${e.transport} · ${e.url}` : `stdio · ${e.command}${e.args?.length ? ' ' + e.args.join(' ') : ''}`;
+  if (isHttp(e)) {
+    const headerCount = e.headers ? Object.keys(e.headers).length : 0;
+    const headerNote = headerCount > 0 ? ` · ${headerCount} header${headerCount === 1 ? '' : 's'}` : '';
+    return `${e.transport ?? 'streamable-http'} · ${e.url}${headerNote}`;
+  }
+  return `stdio · ${e.command}${e.args?.length ? ' ' + e.args.join(' ') : ''}`;
 }
 
 export function SettingsPanel({ open, onClose, settings, availableModels, onSave }: SettingsPanelProps) {
@@ -105,6 +124,7 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
   const [newArgs, setNewArgs] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [newTransport, setNewTransport] = useState<'streamable-http' | 'sse'>('streamable-http');
+  const [newHeaders, setNewHeaders] = useState('');
 
   if (!open) return null;
 
@@ -118,9 +138,10 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
   const addServer = () => {
     const name = newName.trim();
     if (!name || draft.mcpServers.some((s) => s.name === name)) return;
+    const headers = parseHeaders(newHeaders);
     const entry: McpServerEntry =
       newType === 'http'
-        ? { url: newUrl.trim(), transport: newTransport }
+        ? { url: newUrl.trim(), transport: newTransport, ...(headers ? { headers } : {}) }
         : { command: newCommand.trim(), args: newArgs.trim() ? newArgs.trim().split(/\s+/) : undefined };
     if (newType === 'http' ? !newUrl.trim() : !newCommand.trim()) return;
     const next: McpServerSetting = { name, enabled: true, entry };
@@ -129,6 +150,7 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
     setNewCommand('');
     setNewArgs('');
     setNewUrl('');
+    setNewHeaders('');
   };
 
   const save = () => {
@@ -249,17 +271,26 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
               <input style={{ ...input, flex: 1 }} placeholder="args (space-separated)" value={newArgs} onChange={(e) => setNewArgs(e.target.value)} />
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <input style={{ ...input, flex: 1 }} placeholder="https://host/mcp" value={newUrl} onChange={(e) => setNewUrl(e.target.value)} />
-              <select
-                style={{ ...input, width: 160 }}
-                value={newTransport}
-                onChange={(e) => setNewTransport(e.target.value as 'streamable-http' | 'sse')}
-              >
-                <option value="streamable-http">streamable-http</option>
-                <option value="sse">sse</option>
-              </select>
-            </div>
+            <>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <input style={{ ...input, flex: 1 }} placeholder="https://host/mcp" value={newUrl} onChange={(e) => setNewUrl(e.target.value)} />
+                <select
+                  style={{ ...input, width: 160 }}
+                  value={newTransport}
+                  onChange={(e) => setNewTransport(e.target.value as 'streamable-http' | 'sse')}
+                >
+                  <option value="streamable-http">streamable-http</option>
+                  <option value="sse">sse</option>
+                </select>
+              </div>
+              <textarea
+                style={{ ...input, marginBottom: 8, fontFamily: 'monospace', resize: 'vertical' }}
+                rows={3}
+                placeholder={'headers (one per line)\nAuthorization: Bearer <token>\nX-O11y-Tenant: <tenant>'}
+                value={newHeaders}
+                onChange={(e) => setNewHeaders(e.target.value)}
+              />
+            </>
           )}
           <button type="button" style={btn} onClick={addServer}>
             + Add server

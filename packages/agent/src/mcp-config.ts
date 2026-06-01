@@ -9,7 +9,10 @@ export interface StdioServerConfig {
 
 export interface HttpServerConfig {
   url: string;
-  transport: 'streamable-http' | 'sse';
+  /** Defaults to 'streamable-http' when omitted. */
+  transport?: 'streamable-http' | 'sse';
+  /** Extra HTTP headers sent on every request (e.g. Authorization, tenant headers). */
+  headers?: Record<string, string>;
 }
 
 export type McpServerEntry = StdioServerConfig | HttpServerConfig;

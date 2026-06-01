@@ -5,14 +5,14 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { tool, jsonSchema, type Tool } from 'ai';
 import { z } from 'zod';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { getMcpConfig, type McpServerEntry } from './mcp-config';
+import { getMcpConfig, type McpServerEntry, type HttpServerConfig } from './mcp-config';
 
-function isHttpConfig(e: McpServerEntry): e is { url: string; transport: 'streamable-http' | 'sse' } {
+function isHttpConfig(e: McpServerEntry): e is HttpServerConfig {
   return 'url' in e;
 }
 
 function transportLabel(e: McpServerEntry): 'stdio' | 'streamable-http' | 'sse' {
-  return isHttpConfig(e) ? e.transport : 'stdio';
+  return isHttpConfig(e) ? (e.transport ?? 'streamable-http') : 'stdio';
 }
 
 /** Per-server connection status, surfaced to the settings UI for health/diagnostics. */
@@ -42,12 +42,13 @@ async function connectServer(name: string, entry: McpServerEntry): Promise<Clien
   const client = new Client({ name: `arete-${name}`, version: '0.0.1' });
 
   if (isHttpConfig(entry)) {
-    if (entry.transport === 'streamable-http') {
-      const transport = new StreamableHTTPClientTransport(new URL(entry.url));
-      await client.connect(transport);
+    // Custom headers (auth tokens, tenant headers, …) ride on every request.
+    const opts = entry.headers ? { requestInit: { headers: entry.headers } } : undefined;
+    if (entry.transport === 'sse') {
+      await client.connect(new SSEClientTransport(new URL(entry.url), opts));
     } else {
-      const transport = new SSEClientTransport(new URL(entry.url));
-      await client.connect(transport);
+      // Default + 'streamable-http': the modern MCP HTTP transport.
+      await client.connect(new StreamableHTTPClientTransport(new URL(entry.url), opts));
     }
   } else {
     const transport = new StdioClientTransport({
