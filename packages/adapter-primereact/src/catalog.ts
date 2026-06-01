@@ -10,8 +10,9 @@ import { Divider } from './components/Divider';
 import { TextField } from './components/TextField';
 import { CheckBox } from './components/CheckBox';
 import { Chart, ChartApi } from './components/Chart';
+import { Embed, EmbedApi } from './components/Embed';
 
-export { Text, Image, Card, Row, Column, Button, Divider, TextField, CheckBox, Chart, ChartApi };
+export { Text, Image, Card, Row, Column, Button, Divider, TextField, CheckBox, Chart, ChartApi, Embed, EmbedApi };
 
 const COMPONENT_LIST: ReactComponentImplementation[] = [
   Text,
@@ -24,6 +25,7 @@ const COMPONENT_LIST: ReactComponentImplementation[] = [
   TextField,
   CheckBox,
   Chart,
+  Embed,
 ];
 
 export const primeReactCatalog = new Catalog<ReactComponentImplementation>(
@@ -44,4 +46,6 @@ export const componentAgentHints: Record<string, string> = {
   TextField:
     'the field value binds through the surface data model (e.g. {path:"/field"}); read the current value from the data model, not from the component spec.',
   CheckBox: 'value is a boolean; like TextField it reflects live data-model state.',
+  Embed:
+    'a sandboxed iframe the FRAMEWORK creates to render MCP-UI tool resources (HTML/URL). Do NOT emit Embed components yourself; they appear automatically when an MCP tool returns UI. You may reference an existing one if the user asks about it.',
 };

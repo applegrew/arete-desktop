@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { deepEqual, type AgentMessage } from '@arete-ui/core';
 import { buildSystemPrompt, type AgentContext, type McpToolInfo } from './prompt';
-import { getMcpTools } from './mcp';
+import { getMcpTools, collectMcpResources, type McpUiResource } from './mcp';
 import { loadSkills, renderSkillsForPrompt } from './skills';
 
 /** A tool the agent called during a turn (surfaced to the UI as AG-UI TOOL_CALL events). */
@@ -122,30 +122,62 @@ export async function runAgentTurn(body: AgentTurnRequest, opts?: AgentRuntimeOp
   // MCP tool pre-step: let the model gather live data via MCP tools (multi-step),
   // then feed the tool conversation into the envelope step. Additive + failure-
   // tolerant — when no tools (or the model can't call them) this is skipped.
+  // UI resources (MCP-UI / MCP Apps) returned by tools are captured here and
+  // rendered as surfaces, independent of what the model writes.
   const toolCalls: ToolCallRecord[] = [];
+  let uiResources: McpUiResource[] = [];
   if (Object.keys(tools).length > 0) {
     try {
-      const pre = await generateText({ model, system: systemPrompt, messages: convo, tools, stopWhen: stepCountIs(4) });
-      for (const step of pre.steps) {
-        const results = new Map<string, string>();
-        for (const tr of step.toolResults ?? []) {
-          results.set(tr.toolCallId, typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output));
+      const { resources } = await collectMcpResources(async () => {
+        const pre = await generateText({ model, system: systemPrompt, messages: convo, tools, stopWhen: stepCountIs(4) });
+        for (const step of pre.steps) {
+          const results = new Map<string, string>();
+          for (const tr of step.toolResults ?? []) {
+            results.set(tr.toolCallId, typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output));
+          }
+          for (const tc of step.toolCalls ?? []) {
+            toolCalls.push({ toolCallId: tc.toolCallId, toolCallName: tc.toolName, result: results.get(tc.toolCallId) });
+          }
         }
-        for (const tc of step.toolCalls ?? []) {
-          toolCalls.push({ toolCallId: tc.toolCallId, toolCallName: tc.toolName, result: results.get(tc.toolCallId) });
+        if (pre.response?.messages?.length) {
+          convo = [...convo, ...(pre.response.messages as ModelMessage[])];
         }
-      }
-      if (pre.response?.messages?.length) {
-        convo = [...convo, ...(pre.response.messages as ModelMessage[])];
-      }
+      });
+      uiResources = resources;
     } catch (err) {
       console.error('[mcp] tool pre-step skipped:', err);
     }
   }
 
   const outcome = await runAgentWithCorrection(model, systemPrompt, convo, ctx);
-  if (outcome.ok && toolCalls.length > 0) outcome.toolCalls = toolCalls;
+  if (outcome.ok) {
+    if (toolCalls.length > 0) outcome.toolCalls = toolCalls;
+    // Render each captured MCP-UI resource as its own surface (framework-driven,
+    // not model-driven) so tool-served UI lands in the workspace like any surface.
+    for (const r of uiResources) outcome.validated.push(buildEmbedEmission(r));
+  }
   return outcome;
+}
+
+/** Catalog id the chat client renders against (matches the agent's createSurface examples). */
+const BASIC_CATALOG_ID = 'https://a2ui.org/specification/v0_9/basic_catalog.json';
+
+/** Wrap an MCP-UI resource into an A2UI emission rendering a sandboxed Embed surface. */
+function buildEmbedEmission(r: McpUiResource): Record<string, unknown> {
+  const surfaceId = mintSurfaceId();
+  const embed: Record<string, unknown> = { id: 'root', component: 'Embed', title: r.tool };
+  if (r.html) embed.html = r.html;
+  if (r.url) embed.url = r.url;
+  if (r.mimeType) embed.mimeType = r.mimeType;
+  if (r.uri) embed.uri = r.uri;
+  return {
+    kind: 'a2ui',
+    targetSurfaceId: surfaceId,
+    messages: [
+      { version: 'v0.9', createSurface: { surfaceId, catalogId: BASIC_CATALOG_ID, sendDataModel: true } },
+      { version: 'v0.9', updateComponents: { surfaceId, components: [embed] } },
+    ],
+  };
 }
 
 async function runAgentWithCorrection(

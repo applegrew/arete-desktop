@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { AgentSettings, McpServerEntry, McpServerSetting } from './persistence';
+import {
+  getMcpStatus,
+  reconnectMcp,
+  type AgentSettings,
+  type McpServerEntry,
+  type McpServerSetting,
+  type McpServerStatus,
+} from './persistence';
 
 interface SettingsPanelProps {
   open: boolean;
@@ -71,10 +78,25 @@ function describeEntry(e: McpServerEntry): string {
 
 export function SettingsPanel({ open, onClose, settings, availableModels, onSave }: SettingsPanelProps) {
   const [draft, setDraft] = useState<AgentSettings>(settings);
-  // Reset the draft to the latest persisted settings each time the panel opens.
+  const [status, setStatus] = useState<McpServerStatus[]>([]);
+  const [reconnecting, setReconnecting] = useState(false);
+  // Reset the draft + refresh live MCP status each time the panel opens.
   useEffect(() => {
-    if (open) setDraft(settings);
+    if (!open) return;
+    setDraft(settings);
+    getMcpStatus().then(setStatus);
   }, [open, settings]);
+
+  const statusByName = (name: string): McpServerStatus | undefined => status.find((s) => s.name === name);
+
+  const doReconnect = async () => {
+    setReconnecting(true);
+    try {
+      setStatus(await reconnectMcp());
+    } finally {
+      setReconnecting(false);
+    }
+  };
 
   // Add-server form state.
   const [newName, setNewName] = useState('');
@@ -150,36 +172,67 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
         />
 
         {/* MCP servers */}
-        <div style={sectionTitle}>MCP servers</div>
+        <div style={{ ...sectionTitle, display: 'flex', alignItems: 'center' }}>
+          <span style={{ flex: 1 }}>MCP servers</span>
+          <button type="button" style={{ ...btn, padding: '2px 8px', fontWeight: 400 }} onClick={doReconnect} disabled={reconnecting}>
+            {reconnecting ? 'Reconnecting…' : '⟳ Reconnect'}
+          </button>
+        </div>
         {draft.mcpServers.length === 0 && (
           <div style={{ fontSize: 12, color: '#777', marginBottom: 8 }}>No MCP servers configured.</div>
         )}
-        {draft.mcpServers.map((s) => (
-          <div
-            key={s.name}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '6px 8px',
-              background: '#0a0a0a',
-              border: '1px solid #222',
-              borderRadius: 4,
-              marginBottom: 6,
-            }}
-          >
-            <input type="checkbox" checked={s.enabled} onChange={(e) => toggleServer(s.name, e.target.checked)} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, color: '#eee' }}>{s.name}</div>
-              <div style={{ fontSize: 11, color: '#777', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {describeEntry(s.entry)}
+        {draft.mcpServers.map((s) => {
+          const st = statusByName(s.name);
+          const dotColor = !st ? '#555' : st.connected ? '#10b981' : '#ef4444';
+          const statusText = !st
+            ? 'status unknown — save, then Reconnect'
+            : st.connected
+              ? `connected · ${st.toolCount} tool${st.toolCount === 1 ? '' : 's'}${st.tools.length ? ` (${st.tools.join(', ')})` : ''}`
+              : `failed: ${st.error ?? 'connection error'}`;
+          return (
+            <div
+              key={s.name}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                padding: '6px 8px',
+                background: '#0a0a0a',
+                border: '1px solid #222',
+                borderRadius: 4,
+                marginBottom: 6,
+              }}
+            >
+              <input type="checkbox" style={{ marginTop: 3 }} checked={s.enabled} onChange={(e) => toggleServer(s.name, e.target.checked)} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: '#eee', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span
+                    title={statusText}
+                    style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flex: '0 0 auto' }}
+                  />
+                  {s.name}
+                </div>
+                <div style={{ fontSize: 11, color: '#777', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {describeEntry(s.entry)}
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: !st ? '#777' : st.connected ? '#10b981' : '#ef4444',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {statusText}
+                </div>
               </div>
+              <button type="button" style={{ ...btn, padding: '2px 8px' }} onClick={() => removeServer(s.name)} aria-label={`Remove ${s.name}`}>
+                ✕
+              </button>
             </div>
-            <button type="button" style={{ ...btn, padding: '2px 8px' }} onClick={() => removeServer(s.name)} aria-label={`Remove ${s.name}`}>
-              ✕
-            </button>
-          </div>
-        ))}
+          );
+        })}
 
         {/* Add server */}
         <div style={{ border: '1px dashed #333', borderRadius: 4, padding: 10, marginTop: 8 }}>

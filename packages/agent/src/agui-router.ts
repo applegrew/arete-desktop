@@ -3,7 +3,7 @@ import { EventType } from '@ag-ui/core';
 import { randomUUID } from 'node:crypto';
 import { runAgentTurn, agentHealth, type AgentTurnRequest, type AgentRuntimeOptions } from './run-turn';
 import { setMcpConfig, type McpConfig } from './mcp-config';
-import { resetMcpTools } from './mcp';
+import { resetMcpTools, getMcpStatus } from './mcp';
 
 /** CUSTOM event name carrying an arete Emission — must match @arete-ui/agui's ARETE_EMISSION_EVENT. */
 const ARETE_EMISSION_EVENT = 'arete.emission';
@@ -57,6 +57,19 @@ export function createAgentRouter(opts: AgentRouterOptions = {}): Router {
 
   router.get('/health', async (_req: Request, res: Response) => {
     res.json(await agentHealth(resolveTurnOptions()));
+  });
+
+  // Per-server MCP connection status (applies live config first, reconnecting if it changed).
+  router.get('/mcp-status', async (_req: Request, res: Response) => {
+    resolveTurnOptions();
+    res.json(await getMcpStatus());
+  });
+
+  // Force a reconnect of all MCP servers against the current (live) config.
+  router.post('/mcp-reconnect', async (_req: Request, res: Response) => {
+    resolveTurnOptions();
+    resetMcpTools();
+    res.json(await getMcpStatus());
   });
 
   router.post('/', async (req: Request, res: Response) => {

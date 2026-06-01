@@ -115,3 +115,20 @@ export const saveSettings = (patch: Partial<AgentSettings>): Promise<AgentSettin
     headers: JSON_HEADERS,
     body: JSON.stringify(patch),
   }).catch(() => null);
+
+// --- MCP connection status / health ---------------------------------------
+export interface McpServerStatus {
+  name: string;
+  transport: 'stdio' | 'streamable-http' | 'sse';
+  connected: boolean;
+  toolCount: number;
+  tools: string[];
+  error?: string;
+}
+
+export const getMcpStatus = (): Promise<McpServerStatus[]> =>
+  jfetch<McpServerStatus[]>(`${BASE}/agui/mcp-status`).catch(() => []);
+
+/** Force a reconnect of all MCP servers against the live config; returns fresh status. */
+export const reconnectMcp = (): Promise<McpServerStatus[]> =>
+  jfetch<McpServerStatus[]>(`${BASE}/agui/mcp-reconnect`, { method: 'POST' }).catch(() => []);
