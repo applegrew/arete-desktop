@@ -2,10 +2,22 @@ import { Router, type Request, type Response } from 'express';
 import { EventType } from '@ag-ui/core';
 import { randomUUID } from 'node:crypto';
 import { runAgentTurn, agentHealth, type AgentTurnRequest, type AgentRuntimeOptions } from './run-turn';
-import { setMcpConfig } from './mcp-config';
+import { setMcpConfig, type McpConfig } from './mcp-config';
+import { resetMcpTools } from './mcp';
 
 /** CUSTOM event name carrying an arete Emission — must match @arete-ui/agui's ARETE_EMISSION_EVENT. */
 const ARETE_EMISSION_EVENT = 'arete.emission';
+
+/** Options for {@link createAgentRouter}. Static `model`/`ollamaUrl`/`mcp` set the
+ *  baseline; `resolveOptions` (if given) is consulted *per turn* for live overrides
+ *  — e.g. a settings UI that persists the model + enabled MCP servers. */
+export interface AgentRouterOptions extends AgentRuntimeOptions {
+  /** Initial MCP server configuration. */
+  mcp?: McpConfig;
+  /** Resolve current runtime options per turn (live settings). When the returned
+   *  `mcp` config differs from the last applied one, MCP tools are reconnected. */
+  resolveOptions?: () => (Partial<AgentRuntimeOptions> & { mcp?: McpConfig });
+}
 
 /**
  * Express Router for the AG-UI (Agent-User Interaction) endpoint. Mounts:
@@ -16,18 +28,39 @@ const ARETE_EMISSION_EVENT = 'arete.emission';
  * arete UI mutations ride as CUSTOM "arete.emission" events (decoded client-side
  * by `@arete-ui/agui`); assistant text rides as native TEXT_MESSAGE_* events.
  */
-export function createAgentRouter(opts: AgentRuntimeOptions & { mcp?: import('./mcp-config').McpConfig } = {}): Router {
+export function createAgentRouter(opts: AgentRouterOptions = {}): Router {
   const router = Router();
 
+  let lastMcpKey = '';
   if (opts.mcp) {
     setMcpConfig(opts.mcp);
+    lastMcpKey = JSON.stringify(opts.mcp);
+  }
+
+  /** Merge static opts with per-turn live overrides; re-apply MCP config on change. */
+  function resolveTurnOptions(): AgentRuntimeOptions {
+    const dyn = opts.resolveOptions?.() ?? {};
+    if (dyn.mcp) {
+      const key = JSON.stringify(dyn.mcp);
+      if (key !== lastMcpKey) {
+        setMcpConfig(dyn.mcp);
+        resetMcpTools();
+        lastMcpKey = key;
+      }
+    }
+    return {
+      model: dyn.model ?? opts.model,
+      ollamaUrl: dyn.ollamaUrl ?? opts.ollamaUrl,
+      skillsDir: dyn.skillsDir ?? opts.skillsDir,
+    };
   }
 
   router.get('/health', async (_req: Request, res: Response) => {
-    res.json(await agentHealth(opts));
+    res.json(await agentHealth(resolveTurnOptions()));
   });
 
   router.post('/', async (req: Request, res: Response) => {
+    const turnOpts = resolveTurnOptions();
     const threadId = (req.body?.threadId as string) || randomUUID();
     const runId = randomUUID();
 
@@ -43,7 +76,7 @@ export function createAgentRouter(opts: AgentRuntimeOptions & { mcp?: import('./
     send({ type: EventType.RUN_STARTED, threadId, runId });
 
     try {
-      const outcome = await runAgentTurn(req.body as AgentTurnRequest, opts);
+      const outcome = await runAgentTurn(req.body as AgentTurnRequest, turnOpts);
 
       if (!outcome.ok) {
         send({

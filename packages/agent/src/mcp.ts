@@ -53,6 +53,7 @@ function adaptTool(t: { name: string; description?: string; inputSchema: Record<
 }
 
 let toolsPromise: Promise<Record<string, Tool>> | null = null;
+let activeClients: Client[] = [];
 
 async function init(): Promise<Record<string, Tool>> {
   const config = getMcpConfig();
@@ -64,6 +65,7 @@ async function init(): Promise<Record<string, Tool>> {
   for (const [name, entry] of servers) {
     try {
       const client = await connectServer(name, entry);
+      activeClients.push(client);
       const { tools } = await client.listTools();
       for (const t of tools) {
         allTools[t.name] = adaptTool(t, client);
@@ -84,4 +86,18 @@ export function getMcpTools(): Promise<Record<string, Tool>> {
     });
   }
   return toolsPromise;
+}
+
+/**
+ * Drop the memoized tool set and close open MCP client connections, so the next
+ * {@link getMcpTools} call rediscovers tools against the *current* config. Call
+ * after {@link setMcpConfig} when MCP servers change at runtime (e.g. via a
+ * settings UI) — otherwise the first-turn cache would pin the old servers.
+ */
+export function resetMcpTools(): void {
+  for (const client of activeClients) {
+    void Promise.resolve(client.close()).catch(() => {});
+  }
+  activeClients = [];
+  toolsPromise = null;
 }

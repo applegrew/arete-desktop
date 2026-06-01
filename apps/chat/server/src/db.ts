@@ -52,6 +52,10 @@ export interface Store {
   saveChat(entries: ChatEntryRecord[]): void;
   getState(): Record<string, unknown>;
   setState(patch: Record<string, unknown>): void;
+  /** User-editable settings (model, Ollama URL, MCP servers, gate-diffs). Undefined until first saved. */
+  getSettings(): Record<string, unknown> | undefined;
+  /** Shallow-merge a patch into the persisted settings object. */
+  saveSettings(patch: Record<string, unknown>): void;
 }
 
 class SqliteStore implements Store {
@@ -186,6 +190,18 @@ class SqliteStore implements Store {
       for (const [k, v] of Object.entries(obj)) upsert.run(k, JSON.stringify(v));
     });
     tx(patch);
+  }
+
+  getSettings(): Record<string, unknown> | undefined {
+    const row = this.db.prepare('SELECT v FROM app_state WHERE k = ?').get('settings') as { v: string } | undefined;
+    return row ? safeParse<Record<string, unknown>>(row.v, {}) : undefined;
+  }
+
+  saveSettings(patch: Record<string, unknown>): void {
+    const next = { ...(this.getSettings() ?? {}), ...patch };
+    this.db
+      .prepare('INSERT INTO app_state (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v')
+      .run('settings', JSON.stringify(next));
   }
 }
 

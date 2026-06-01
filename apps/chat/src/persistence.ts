@@ -72,10 +72,46 @@ export const loadState = (): Promise<Record<string, unknown>> =>
 export const saveState = (state: Record<string, unknown>): Promise<void> =>
   jfetch(`${BASE}/state`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(state) }).then(() => {});
 
-export async function getAgentHealth(): Promise<{ ok: boolean; model?: string }> {
+export async function getAgentHealth(): Promise<{ ok: boolean; model?: string; available?: string[] }> {
   try {
     return await jfetch(`${BASE}/agui/health`);
   } catch {
     return { ok: false };
   }
 }
+
+// --- Settings (model, Ollama URL, MCP servers, gate-diffs) ----------------
+export interface StdioServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+export interface HttpServerConfig {
+  url: string;
+  transport: 'streamable-http' | 'sse';
+}
+export type McpServerEntry = StdioServerConfig | HttpServerConfig;
+
+export interface McpServerSetting {
+  name: string;
+  enabled: boolean;
+  entry: McpServerEntry;
+}
+
+export interface AgentSettings {
+  model: string;
+  ollamaUrl: string;
+  mcpServers: McpServerSetting[];
+  gateDiffs: boolean;
+}
+
+export const loadSettings = (): Promise<AgentSettings | null> =>
+  jfetch<AgentSettings>(`${BASE}/settings`).catch(() => null);
+
+/** Shallow-merge a patch server-side; returns the full merged settings. */
+export const saveSettings = (patch: Partial<AgentSettings>): Promise<AgentSettings | null> =>
+  jfetch<AgentSettings>(`${BASE}/settings`, {
+    method: 'PUT',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(patch),
+  }).catch(() => null);
