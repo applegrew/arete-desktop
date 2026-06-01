@@ -80,6 +80,9 @@ export function App() {
   const chatStore = useMemo(() => new ChatStore(), []);
 
   const [diffsGated, setDiffsGated] = useState(true);
+  // Gates all persistence writes until the initial DB restore completes, so the
+  // empty/default mount state never overwrites persisted chat/pages/state.
+  const [hydrated, setHydrated] = useState(false);
   const [settings, setSettings] = useState<AgentSettings | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -322,20 +325,29 @@ export function App() {
         chatStore.push({ role: e.role as 'user' | 'agent' | 'system', text: e.text, surfaceId: e.surfaceId, id: e.id });
       }
 
-      // 4. App state.
+      // 4. App state (active tab + chat dock position).
       const st = await loadState();
-      if (st && typeof st.activeTabId === 'string') {
-        setShellState((s) => ({ ...s, activeTabId: st.activeTabId as string }));
+      if (st) {
+        setShellState((s) => ({
+          ...s,
+          ...(typeof st.activeTabId === 'string' ? { activeTabId: st.activeTabId } : {}),
+          ...(st.chatDockState === 'page' || st.chatDockState === 'dock' || st.chatDockState === 'rail'
+            ? { chatDockState: st.chatDockState }
+            : {}),
+        }));
       }
       getAgentHealth()
         .then((h) => setAvailableModels(h.available ?? []))
         .catch(() => {});
-    })().catch(() => {});
+    })()
+      .catch(() => {})
+      .finally(() => setHydrated(true)); // enable persistence only after restore
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- debounced saves -----------------------------------------------------
+  // --- debounced saves (gated on hydration; see {@link hydrated}) ----------
   useEffect(() => {
+    if (!hydrated) return;
     const t = setTimeout(() => {
       const entries = chatStore.getSnapshot().map((e) => ({
         id: e.id,
@@ -347,9 +359,10 @@ export function App() {
       saveChat(entries).catch(() => {});
     }, 1500);
     return () => clearTimeout(t);
-  }, [chatStore, persistTick]);
+  }, [chatStore, persistTick, hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return;
     const t = setTimeout(() => {
       const recs = Object.entries(surfaceContentsRef.current).map(([surfaceId, components]) => {
         let dataModel: Record<string, unknown> = {};
@@ -364,11 +377,12 @@ export function App() {
       saveSurfaces(recs).catch(() => {});
     }, 1500);
     return () => clearTimeout(t);
-  }, [persistTick, liveProcessor]);
+  }, [persistTick, liveProcessor, hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return;
     saveState({ activeTabId: shellState.activeTabId, chatDockState: shellState.chatDockState }).catch(() => {});
-  }, [shellState]);
+  }, [shellState, hydrated]);
 
   // --- prompt → AG-UI stream → diff pipeline -------------------------------
   const handlePrompt = useCallback(
