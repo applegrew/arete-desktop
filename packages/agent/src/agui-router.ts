@@ -110,6 +110,7 @@ export function createAgentRouter(opts: AgentRouterOptions = {}): Router {
             toolCallId: tc.toolCallId,
             messageId: `tool:${tc.toolCallId}`,
             content: tc.result,
+            isError: tc.isError ?? false,
           });
         }
         send({ type: EventType.TOOL_CALL_END, toolCallId: tc.toolCallId });

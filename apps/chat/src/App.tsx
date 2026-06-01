@@ -432,10 +432,11 @@ export function App() {
         await streamAgent(text, priorMessages, agentContext, {
           onToolCallStart: ({ toolCallName, toolCallId }) => {
             clearAsking();
-            chatStore.push({ role: 'tool', toolName: toolCallName, toolResult: undefined, id: toolCallId });
+            chatStore.push({ role: 'tool', toolName: toolCallName, id: toolCallId });
           },
-          onToolResult: ({ toolCallId, content }) => {
-            chatStore.push({ role: 'tool', toolName: toolCallId, toolResult: content });
+          onToolResult: ({ toolCallId, content, isError }) => {
+            // Attach the result to the existing tool row (created on start) by id.
+            chatStore.update(toolCallId, { toolResult: content, toolError: isError });
           },
           onTextEnd: ({ messageId, text: msgText }) => {
             clearAsking();

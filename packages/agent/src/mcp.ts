@@ -134,15 +134,21 @@ function adaptTool(t: { name: string; description?: string; inputSchema: Record<
         arguments: (args as Record<string, unknown>) ?? {},
       });
       const content = (res.content ?? []) as Array<Record<string, unknown>>;
+      const text = content
+        .filter((c) => c.type === 'text')
+        .map((c) => (c as { text?: string }).text ?? '')
+        .join('\n');
+
+      // MCP tool-level failure (result with isError) → throw so the agent loop
+      // records a tool-error and the UI marks the call as failed (not a result).
+      if (res.isError) {
+        throw new Error(text || `MCP tool "${t.name}" failed`);
+      }
 
       // Capture any UI resources for separate rendering (MCP-UI / MCP Apps).
       const sink = resourceStore.getStore();
       if (sink) sink.push(...extractUiResources(t.name, content));
 
-      const text = content
-        .filter((c) => c.type === 'text')
-        .map((c) => (c as { text?: string }).text ?? '')
-        .join('\n');
       if (text) return text;
       const uiCount = content.filter((c) => c.type === 'resource' || c.type === 'resource_link').length;
       return uiCount > 0 ? `[Tool returned ${uiCount} UI resource(s), rendered in the workspace.]` : '';

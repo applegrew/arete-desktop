@@ -12,6 +12,34 @@ export interface ToolCallRecord {
   toolCallId: string;
   toolCallName: string;
   result?: string;
+  /** True when the tool call failed — `result` holds the error detail. */
+  isError?: boolean;
+}
+
+/** Flatten a tool-execution error (and its cause) into a readable string. */
+function formatToolError(error: unknown): string {
+  if (error instanceof Error) {
+    const cause = (error as { cause?: unknown }).cause;
+    const causeStr =
+      cause instanceof Error
+        ? `\ncaused by: ${cause.name}: ${cause.message}`
+        : cause !== undefined
+          ? `\ncaused by: ${String(cause)}`
+          : '';
+    return `${error.name}: ${error.message}${causeStr}`;
+  }
+  return String(error);
+}
+
+/** Record a tool result/error against its call (matched by id), or add a new record. */
+function attachToolResult(calls: ToolCallRecord[], id: string, name: string, result: string, isError: boolean): void {
+  const rec = calls.find((c) => c.toolCallId === id);
+  if (rec) {
+    rec.result = result;
+    if (isError) rec.isError = true;
+  } else {
+    calls.push({ toolCallId: id, toolCallName: name, result, isError: isError || undefined });
+  }
 }
 
 /** Runtime configuration for an agent turn (overrides env defaults). */
@@ -130,13 +158,20 @@ export async function runAgentTurn(body: AgentTurnRequest, opts?: AgentRuntimeOp
     try {
       const { resources } = await collectMcpResources(async () => {
         const pre = await generateText({ model, system: systemPrompt, messages: convo, tools, stopWhen: stepCountIs(4) });
+        // Walk each step's content parts — the authoritative source for tool
+        // names, results, AND errors (tool-error parts are NOT in `toolResults`).
         for (const step of pre.steps) {
-          const results = new Map<string, string>();
-          for (const tr of step.toolResults ?? []) {
-            results.set(tr.toolCallId, typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output));
-          }
-          for (const tc of step.toolCalls ?? []) {
-            toolCalls.push({ toolCallId: tc.toolCallId, toolCallName: tc.toolName, result: results.get(tc.toolCallId) });
+          for (const part of (step.content ?? []) as ReadonlyArray<Record<string, unknown>>) {
+            const id = part.toolCallId as string;
+            const name = part.toolName as string;
+            if (part.type === 'tool-call') {
+              if (!toolCalls.some((c) => c.toolCallId === id)) toolCalls.push({ toolCallId: id, toolCallName: name });
+            } else if (part.type === 'tool-result') {
+              const out = part.output;
+              attachToolResult(toolCalls, id, name, typeof out === 'string' ? out : JSON.stringify(out), false);
+            } else if (part.type === 'tool-error') {
+              attachToolResult(toolCalls, id, name, formatToolError(part.error), true);
+            }
           }
         }
         if (pre.response?.messages?.length) {

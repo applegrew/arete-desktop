@@ -47,7 +47,7 @@ export interface AgUiHandlers {
 
   onToolCallStart?(info: ToolCallInfo): void;
   onToolCallEnd?(info: { toolCallId: string }): void;
-  onToolResult?(info: { toolCallId: string; content: string }): void;
+  onToolResult?(info: { toolCallId: string; content: string; isError?: boolean }): void;
 
   /** Workspace/app state snapshot or RFC-6902 delta (future: route through diff). */
   onState?(update: StateUpdate): void;
@@ -130,6 +130,7 @@ export class AgUiDecoder {
         h.onToolResult?.({
           toolCallId: e.toolCallId as string,
           content: String(e.content ?? ''),
+          isError: !!e.isError,
         });
         break;
 

@@ -17,6 +17,8 @@ export interface ChatEntry {
   toolName?: string;
   /** Tool result content (present when role === 'tool'). */
   toolResult?: string;
+  /** True when the tool call failed — toolResult holds the error. */
+  toolError?: boolean;
   createdAt: number;
 }
 
@@ -41,11 +43,25 @@ export class ChatStore {
       role: entry.role,
       text: entry.text,
       surfaceId: entry.surfaceId,
+      toolName: entry.toolName,
+      toolResult: entry.toolResult,
+      toolError: entry.toolError,
       createdAt: Date.now(),
     };
     this.entries = [...this.entries, e];
     this.emit();
     return e;
+  }
+
+  /** Merge a patch into an existing entry by id (e.g. attach a tool result to its start row). */
+  update(id: string, patch: Partial<Omit<ChatEntry, 'id'>>): void {
+    let changed = false;
+    this.entries = this.entries.map((e) => {
+      if (e.id !== id) return e;
+      changed = true;
+      return { ...e, ...patch };
+    });
+    if (changed) this.emit();
   }
 
   remove(id: string): void {

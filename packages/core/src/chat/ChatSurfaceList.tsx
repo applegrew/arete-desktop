@@ -112,8 +112,13 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
   );
 }
 
-function ToolResultEntry({ entry }: { entry: { id: string; toolName?: string; toolResult?: string } }) {
-  const [expanded, setExpanded] = useState(false);
+function ToolResultEntry({
+  entry,
+}: {
+  entry: { id: string; toolName?: string; toolResult?: string; toolError?: boolean };
+}) {
+  // Errors expand by default so the failure is visible without a click.
+  const [expanded, setExpanded] = useState(!!entry.toolError);
 
   return (
     <li
@@ -147,6 +152,7 @@ function ToolResultEntry({ entry }: { entry: { id: string; toolName?: string; to
         <span style={{ fontSize: 10 }}>{expanded ? '▼' : '▶'}</span>
         <span style={{ fontSize: 14, marginRight: 2 }}>🔧</span>
         <span style={{ fontWeight: 600 }}>{entry.toolName ?? 'tool'}</span>
+        {entry.toolError && <span style={{ color: '#f87171', fontWeight: 600 }}>· failed</span>}
       </button>
       {expanded && (
         <pre
@@ -156,7 +162,7 @@ function ToolResultEntry({ entry }: { entry: { id: string; toolName?: string; to
             background: '#0d1117',
             borderRadius: 4,
             fontSize: 11,
-            color: '#7ee787',
+            color: entry.toolError ? '#f87171' : '#7ee787',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-all',
             maxHeight: 200,
