@@ -127,6 +127,8 @@ export interface McpServerStatus {
   toolCount: number;
   tools: string[];
   error?: string;
+  /** Full failure detail incl. cause chain — shown in the expandable error view. */
+  errorDetail?: string;
 }
 
 export const getMcpStatus = (): Promise<McpServerStatus[]> =>

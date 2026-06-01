@@ -22,7 +22,24 @@ export interface McpServerStatus {
   connected: boolean;
   toolCount: number;
   tools: string[];
+  /** Short, one-line failure message (e.g. "fetch failed"). */
   error?: string;
+  /** Full failure detail incl. the cause chain — shown in the expandable error view. */
+  errorDetail?: string;
+}
+
+/** Flatten an error and its `cause` chain into a readable multi-line detail string. */
+function formatErrorDetail(err: unknown): string {
+  const lines: string[] = [];
+  let e: unknown = err;
+  for (let depth = 0; e instanceof Error && depth < 6; depth++) {
+    const meta = e as { code?: unknown };
+    const code = meta.code !== undefined ? ` (code: ${String(meta.code)})` : '';
+    lines.push(`${depth === 0 ? '' : 'caused by: '}${e.name}: ${e.message}${code}`);
+    e = (e as { cause?: unknown }).cause;
+  }
+  if (e !== undefined && !(e instanceof Error)) lines.push(`caused by: ${String(e)}`);
+  return lines.join('\n');
 }
 
 /** A UI resource emitted by an MCP tool (MCP-UI / MCP Apps), rendered in a surface. */
@@ -167,6 +184,7 @@ async function init(): Promise<Record<string, Tool>> {
       status.tools = names;
     } catch (err) {
       status.error = err instanceof Error ? err.message : String(err);
+      status.errorDetail = formatErrorDetail(err);
       console.error(`[mcp] server "${name}" connection failed:`, err);
     }
     serverStatuses.push(status);

@@ -99,6 +99,15 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
   const [draft, setDraft] = useState<AgentSettings>(settings);
   const [status, setStatus] = useState<McpServerStatus[]>([]);
   const [reconnecting, setReconnecting] = useState(false);
+  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+
+  const toggleError = (name: string) =>
+    setExpandedErrors((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
   // Reset the draft + refresh live MCP status each time the panel opens.
   useEffect(() => {
     if (!open) return;
@@ -125,6 +134,8 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
   const [newUrl, setNewUrl] = useState('');
   const [newTransport, setNewTransport] = useState<'streamable-http' | 'sse'>('streamable-http');
   const [newHeaders, setNewHeaders] = useState('');
+  // Original name of the server being edited (null = adding a new one).
+  const [editingName, setEditingName] = useState<string | null>(null);
 
   if (!open) return null;
 
@@ -135,22 +146,59 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
 
   const removeServer = (name: string) => set({ mcpServers: draft.mcpServers.filter((s) => s.name !== name) });
 
-  const addServer = () => {
-    const name = newName.trim();
-    if (!name || draft.mcpServers.some((s) => s.name === name)) return;
-    const headers = parseHeaders(newHeaders);
-    const entry: McpServerEntry =
-      newType === 'http'
-        ? { url: newUrl.trim(), transport: newTransport, ...(headers ? { headers } : {}) }
-        : { command: newCommand.trim(), args: newArgs.trim() ? newArgs.trim().split(/\s+/) : undefined };
-    if (newType === 'http' ? !newUrl.trim() : !newCommand.trim()) return;
-    const next: McpServerSetting = { name, enabled: true, entry };
-    set({ mcpServers: [...draft.mcpServers, next] });
+  const resetForm = () => {
+    setEditingName(null);
     setNewName('');
     setNewCommand('');
     setNewArgs('');
     setNewUrl('');
     setNewHeaders('');
+    setNewTransport('streamable-http');
+    setNewType('stdio');
+  };
+
+  // Load a server's details into the form for editing (triggered by clicking its title).
+  const startEdit = (s: McpServerSetting) => {
+    setEditingName(s.name);
+    setNewName(s.name);
+    if (isHttp(s.entry)) {
+      setNewType('http');
+      setNewUrl(s.entry.url);
+      setNewTransport(s.entry.transport ?? 'streamable-http');
+      setNewHeaders(
+        s.entry.headers ? Object.entries(s.entry.headers).map(([k, v]) => `${k}: ${v}`).join('\n') : '',
+      );
+      setNewCommand('');
+      setNewArgs('');
+    } else {
+      setNewType('stdio');
+      setNewCommand(s.entry.command);
+      setNewArgs(s.entry.args?.join(' ') ?? '');
+      setNewUrl('');
+      setNewHeaders('');
+    }
+  };
+
+  // Add or update the form's server and persist immediately (panel stays open).
+  // Status refreshes via the open-effect when `settings` updates.
+  const saveServer = () => {
+    const name = newName.trim();
+    if (!name) return;
+    // Name must be unique — except for the server currently being edited.
+    if (draft.mcpServers.some((s) => s.name === name && s.name !== editingName)) return;
+    if (newType === 'http' ? !newUrl.trim() : !newCommand.trim()) return;
+    const headers = parseHeaders(newHeaders);
+    const entry: McpServerEntry =
+      newType === 'http'
+        ? { url: newUrl.trim(), transport: newTransport, ...(headers ? { headers } : {}) }
+        : { command: newCommand.trim(), args: newArgs.trim() ? newArgs.trim().split(/\s+/) : undefined };
+    const nextServers = editingName
+      ? draft.mcpServers.map((s) => (s.name === editingName ? { name, enabled: s.enabled, entry } : s))
+      : [...draft.mcpServers, { name, enabled: true, entry }];
+    const nextSettings: AgentSettings = { ...draft, mcpServers: nextServers };
+    setDraft(nextSettings);
+    onSave(nextSettings);
+    resetForm();
   };
 
   const save = () => {
@@ -206,11 +254,15 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
         {draft.mcpServers.map((s) => {
           const st = statusByName(s.name);
           const dotColor = !st ? '#555' : st.connected ? '#10b981' : '#ef4444';
+          const failed = !!st && !st.connected;
           const statusText = !st
             ? 'status unknown — save, then Reconnect'
             : st.connected
               ? `connected · ${st.toolCount} tool${st.toolCount === 1 ? '' : 's'}${st.tools.length ? ` (${st.tools.join(', ')})` : ''}`
               : `failed: ${st.error ?? 'connection error'}`;
+          const detail = st?.errorDetail ?? st?.error;
+          const expanded = expandedErrors.has(s.name);
+          const isEditing = editingName === s.name;
           return (
             <div
               key={s.name}
@@ -220,7 +272,7 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
                 gap: 8,
                 padding: '6px 8px',
                 background: '#0a0a0a',
-                border: '1px solid #222',
+                border: isEditing ? '1px solid #1e3a8a' : '1px solid #222',
                 borderRadius: 4,
                 marginBottom: 6,
               }}
@@ -232,22 +284,63 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
                     title={statusText}
                     style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flex: '0 0 auto' }}
                   />
-                  {s.name}
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startEdit(s);
+                    }}
+                    title="Edit this server"
+                    style={{ cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
+                  >
+                    {s.name}
+                  </span>
                 </div>
                 <div style={{ fontSize: 11, color: '#777', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {describeEntry(s.entry)}
                 </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: !st ? '#777' : st.connected ? '#10b981' : '#ef4444',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {statusText}
-                </div>
+                {failed ? (
+                  <>
+                    <div
+                      onClick={() => toggleError(s.name)}
+                      title="Show error detail"
+                      style={{ fontSize: 11, color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                    >
+                      <span style={{ flex: '0 0 auto' }}>{expanded ? '▼' : '▶'}</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{statusText}</span>
+                    </div>
+                    {expanded && detail && (
+                      <pre
+                        style={{
+                          fontSize: 10,
+                          color: '#f87171',
+                          background: '#1a0d0d',
+                          border: '1px solid #3a1f1f',
+                          borderRadius: 4,
+                          padding: 6,
+                          margin: '4px 0 0',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          maxHeight: 160,
+                          overflow: 'auto',
+                        }}
+                      >
+                        {detail}
+                      </pre>
+                    )}
+                  </>
+                ) : (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: !st ? '#777' : '#10b981',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {statusText}
+                  </div>
+                )}
               </div>
               <button type="button" style={{ ...btn, padding: '2px 8px' }} onClick={() => removeServer(s.name)} aria-label={`Remove ${s.name}`}>
                 ✕
@@ -256,8 +349,29 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
           );
         })}
 
-        {/* Add server */}
-        <div style={{ border: '1px dashed #333', borderRadius: 4, padding: 10, marginTop: 8 }}>
+        {/* Add / edit server */}
+        <div
+          style={{
+            border: editingName ? '1px dashed #1e3a8a' : '1px dashed #333',
+            borderRadius: 4,
+            padding: 10,
+            marginTop: 8,
+          }}
+        >
+          {editingName && (
+            <div style={{ fontSize: 12, color: '#aaa', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>
+                Editing <strong style={{ color: '#eee' }}>{editingName}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={resetForm}
+                style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: 12, padding: 0 }}
+              >
+                cancel
+              </button>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <input style={{ ...input, flex: 1 }} placeholder="server name" value={newName} onChange={(e) => setNewName(e.target.value)} />
             <select style={{ ...input, width: 110 }} value={newType} onChange={(e) => setNewType(e.target.value as 'stdio' | 'http')}>
@@ -292,8 +406,8 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
               />
             </>
           )}
-          <button type="button" style={btn} onClick={addServer}>
-            + Add server
+          <button type="button" style={btn} onClick={saveServer}>
+            {editingName ? 'Update server' : 'Save server'}
           </button>
         </div>
 
