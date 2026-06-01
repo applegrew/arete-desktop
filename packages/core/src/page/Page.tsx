@@ -115,7 +115,7 @@ export function Page(props: PageProps) {
             alignItems: 'center',
             justifyContent: 'center',
             height: '100%',
-            color: '#555',
+            color: 'var(--text-faint, #555)',
             fontSize: 12,
             fontStyle: 'italic',
           }}
@@ -229,7 +229,7 @@ export function Page(props: PageProps) {
       style={{
         height: '100%',
         width: '100%',
-        padding: 8,
+        padding: 18,
         boxSizing: 'border-box',
         position: 'relative',
         display: 'flex',

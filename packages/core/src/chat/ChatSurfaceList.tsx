@@ -34,13 +34,13 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
         flex: 1,
         listStyle: 'none',
         margin: 0,
-        padding: 12,
+        padding: '16px 14px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
+        gap: 10,
         overflowY: 'auto',
-        background: '#0a0a0a',
-        color: '#eee',
+        background: 'transparent',
+        color: 'var(--text, #eee)',
       }}
     >
       {entries.map((entry) => {
@@ -50,13 +50,14 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
               key={entry.id}
               style={{
                 background: 'transparent',
-                color: '#888',
-                fontStyle: 'italic',
-                fontSize: 12,
+                color: 'var(--text-faint, #888)',
+                fontSize: 11.5,
                 alignSelf: 'center',
                 maxWidth: '90%',
                 textAlign: 'center',
                 padding: '2px 8px',
+                letterSpacing: 0.2,
+                animation: 'glass-rise 0.3s ease both',
               }}
             >
               {entry.text}
@@ -69,17 +70,18 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
               key={entry.id}
               style={{
                 background: 'transparent',
-                color: '#6b7280',
+                color: 'var(--text-dim, #6b7280)',
                 fontStyle: 'italic',
-                fontSize: 12,
+                fontSize: 12.5,
                 alignSelf: 'flex-start',
-                maxWidth: '85%',
-                padding: '2px 0 2px 10px',
-                borderLeft: '2px solid #374151',
+                maxWidth: '88%',
+                padding: '2px 0 2px 12px',
+                borderLeft: '2px solid rgba(124,131,255,0.45)',
                 whiteSpace: 'pre-wrap',
+                animation: 'glass-rise 0.3s ease both',
               }}
             >
-              <div style={{ fontSize: 10, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>
+              <div style={{ fontSize: 9.5, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 3, fontFamily: 'var(--font-display)' }}>
                 thinking
               </div>
               {entry.text}
@@ -89,16 +91,30 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
         if (entry.role === 'tool') {
           return <ToolResultEntry key={entry.id} entry={entry} />;
         }
+        const isUser = entry.role === 'user';
         return (
           <li
             key={entry.id}
             style={{
-              background: entry.role === 'user' ? '#1e3a8a' : '#1f2937',
-              padding: '8px 12px',
-              borderRadius: 8,
-              fontSize: 13,
-              alignSelf: entry.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '85%',
+              background: isUser
+                ? 'linear-gradient(155deg, rgba(124,131,255,0.34), rgba(91,99,245,0.20))'
+                : 'var(--glass-2, #1f2937)',
+              backdropFilter: 'var(--blur)',
+              WebkitBackdropFilter: 'var(--blur)',
+              border: isUser ? '1px solid rgba(124,131,255,0.4)' : '1px solid var(--glass-border, transparent)',
+              padding: '10px 14px',
+              borderRadius: 16,
+              borderBottomRightRadius: isUser ? 5 : 16,
+              borderBottomLeftRadius: isUser ? 16 : 5,
+              fontSize: 13.5,
+              lineHeight: 1.5,
+              color: 'var(--text)',
+              alignSelf: isUser ? 'flex-end' : 'flex-start',
+              maxWidth: '86%',
+              boxShadow: isUser
+                ? '0 8px 24px -10px rgba(124,131,255,0.6), inset 0 1px 0 rgba(255,255,255,0.18)'
+                : 'var(--shadow), inset 0 1px 0 rgba(255,255,255,0.07)',
+              animation: 'glass-rise 0.32s cubic-bezier(0.22,1,0.36,1) both',
             }}
           >
             {entry.text && <div>{entry.text}</div>}
@@ -123,13 +139,17 @@ function ToolResultEntry({
   return (
     <li
       style={{
-        background: '#1a1e2e',
-        border: '1px solid #2d3350',
-        borderRadius: 6,
-        padding: '6px 10px',
+        background: entry.toolError ? 'rgba(248,113,113,0.07)' : 'var(--glass, #1a1e2e)',
+        backdropFilter: 'var(--blur)',
+        WebkitBackdropFilter: 'var(--blur)',
+        border: `1px solid ${entry.toolError ? 'rgba(248,113,113,0.32)' : 'var(--glass-border, #2d3350)'}`,
+        borderRadius: 12,
+        padding: '8px 12px',
         fontSize: 12,
         alignSelf: 'flex-start',
-        maxWidth: '85%',
+        maxWidth: '86%',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+        animation: 'glass-rise 0.3s ease both',
       }}
     >
       <button
@@ -138,7 +158,7 @@ function ToolResultEntry({
         style={{
           background: 'transparent',
           border: 'none',
-          color: '#8b9cc7',
+          color: 'var(--text-dim, #8b9cc7)',
           cursor: 'pointer',
           fontSize: 12,
           padding: 0,
@@ -149,20 +169,22 @@ function ToolResultEntry({
           textAlign: 'left',
         }}
       >
-        <span style={{ fontSize: 10 }}>{expanded ? '▼' : '▶'}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{expanded ? '▼' : '▶'}</span>
         <span style={{ fontSize: 14, marginRight: 2 }}>🔧</span>
-        <span style={{ fontWeight: 600 }}>{entry.toolName ?? 'tool'}</span>
+        <span style={{ fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{entry.toolName ?? 'tool'}</span>
         {entry.toolError && <span style={{ color: '#f87171', fontWeight: 600 }}>· failed</span>}
       </button>
       {expanded && (
         <pre
           style={{
-            margin: '6px 0 0 0',
-            padding: '4px 8px',
-            background: '#0d1117',
-            borderRadius: 4,
+            margin: '8px 0 0 0',
+            padding: '8px 10px',
+            background: 'rgba(0,0,0,0.32)',
+            border: '1px solid var(--hairline)',
+            borderRadius: 8,
             fontSize: 11,
-            color: entry.toolError ? '#f87171' : '#7ee787',
+            fontFamily: 'var(--font-mono)',
+            color: entry.toolError ? '#fca5a5' : '#7ee7b0',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-all',
             maxHeight: 200,

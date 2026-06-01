@@ -31,12 +31,14 @@ export function Chat({ store, mode, onModeChange, renderSurface }: ChatProps) {
         style={{
           width: RAIL_WIDTH,
           flexShrink: 0,
-          background: '#1a1a1a',
-          color: '#fff',
+          background: 'var(--glass, #1a1a1a)',
+          backdropFilter: 'var(--blur)',
+          WebkitBackdropFilter: 'var(--blur)',
+          color: 'var(--text, #fff)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          borderLeft: '1px solid #2a2a2a',
+          borderLeft: '1px solid var(--hairline, #2a2a2a)',
         }}
       >
         <button
@@ -62,8 +64,10 @@ export function Chat({ store, mode, onModeChange, renderSurface }: ChatProps) {
             transform: 'rotate(180deg)',
             marginTop: 16,
             fontSize: 12,
-            letterSpacing: 1,
-            color: '#888',
+            letterSpacing: 2,
+            textTransform: 'uppercase',
+            fontFamily: 'var(--font-display)',
+            color: 'var(--text-dim, #888)',
           }}
         >
           Chat
@@ -80,7 +84,10 @@ export function Chat({ store, mode, onModeChange, renderSurface }: ChatProps) {
           flexShrink: 0,
           display: 'flex',
           flexDirection: 'column',
-          borderLeft: '1px solid #2a2a2a',
+          borderLeft: '1px solid var(--hairline, #2a2a2a)',
+          background: 'rgba(255,255,255,0.02)',
+          backdropFilter: 'var(--blur)',
+          WebkitBackdropFilter: 'var(--blur)',
         };
 
   return (
@@ -90,14 +97,18 @@ export function Chat({ store, mode, onModeChange, renderSurface }: ChatProps) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '6px 10px',
-          background: '#111',
-          color: '#fff',
-          borderBottom: '1px solid #2a2a2a',
-          fontSize: 13,
+          padding: '10px 14px',
+          background: 'transparent',
+          color: 'var(--text-dim, #fff)',
+          borderBottom: '1px solid var(--hairline, #2a2a2a)',
+          fontSize: 11,
+          letterSpacing: 1.5,
+          textTransform: 'uppercase',
+          fontFamily: 'var(--font-display)',
+          fontWeight: 600,
         }}
       >
-        <span>Chat {mode === 'page' ? '(full)' : '(docked)'}</span>
+        <span>Chat · {mode === 'page' ? 'full' : 'docked'}</span>
         {mode === 'dock' && (
           <button
             type="button"
@@ -107,7 +118,7 @@ export function Chat({ store, mode, onModeChange, renderSurface }: ChatProps) {
             style={{
               border: 'none',
               background: 'transparent',
-              color: '#888',
+              color: 'var(--text-faint, #888)',
               cursor: 'pointer',
               fontSize: 14,
             }}

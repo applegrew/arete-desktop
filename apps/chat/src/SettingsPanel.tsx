@@ -35,51 +35,63 @@ interface SettingsPanelProps {
 const overlay: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: 'rgba(0,0,0,0.55)',
+  background: 'rgba(5,6,16,0.5)',
+  backdropFilter: 'blur(8px)',
+  WebkitBackdropFilter: 'blur(8px)',
   display: 'flex',
   alignItems: 'flex-start',
   justifyContent: 'center',
   paddingTop: '6vh',
   zIndex: 1000,
+  animation: 'glass-rise 0.2s ease both',
 };
 const panel: React.CSSProperties = {
   width: 'min(560px, 92vw)',
   maxHeight: '84vh',
   overflowY: 'auto',
-  background: '#111',
-  color: '#eee',
-  border: '1px solid #333',
-  borderRadius: 8,
-  padding: 20,
-  boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+  background: 'linear-gradient(180deg, rgba(28,30,54,0.78), rgba(14,15,32,0.82))',
+  backdropFilter: 'var(--blur-strong)',
+  WebkitBackdropFilter: 'var(--blur-strong)',
+  color: 'var(--text)',
+  border: '1px solid var(--glass-border-2)',
+  borderRadius: 20,
+  padding: 24,
+  boxShadow: 'var(--shadow-lg), inset 0 1px 0 rgba(255,255,255,0.12)',
+  animation: 'glass-rise 0.26s cubic-bezier(0.22,1,0.36,1) both',
 };
-const label: React.CSSProperties = { display: 'block', fontSize: 12, color: '#aaa', marginBottom: 4 };
+const label: React.CSSProperties = { display: 'block', fontSize: 12, color: 'var(--text-dim)', marginBottom: 5 };
 const input: React.CSSProperties = {
   width: '100%',
-  background: '#0a0a0a',
-  color: '#eee',
-  border: '1px solid #333',
-  borderRadius: 4,
-  padding: '6px 8px',
+  background: 'var(--glass)',
+  color: 'var(--text)',
+  border: '1px solid var(--glass-border)',
+  borderRadius: 10,
+  padding: '9px 12px',
   fontSize: 13,
   boxSizing: 'border-box',
+  outline: 'none',
 };
 const btn: React.CSSProperties = {
-  background: '#1f2937',
-  color: '#eee',
-  border: '1px solid #333',
-  borderRadius: 4,
-  padding: '6px 12px',
+  background: 'var(--glass-2)',
+  color: 'var(--text)',
+  border: '1px solid var(--glass-border)',
+  borderRadius: 999,
+  padding: '8px 16px',
   fontSize: 13,
+  fontWeight: 500,
   cursor: 'pointer',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
 };
 const sectionTitle: React.CSSProperties = {
-  fontSize: 13,
+  fontSize: 11,
   fontWeight: 600,
-  color: '#ddd',
-  margin: '20px 0 8px',
-  borderBottom: '1px solid #222',
-  paddingBottom: 4,
+  color: 'var(--text-dim)',
+  textTransform: 'uppercase',
+  letterSpacing: 1.2,
+  fontFamily: 'var(--font-display)',
+  margin: '22px 0 10px',
+  borderBottom: '1px solid var(--hairline)',
+  paddingBottom: 6,
 };
 
 function isHttp(e: McpServerEntry): e is HttpServerConfig {
@@ -210,7 +222,7 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
     <div style={overlay} onClick={onClose}>
       <div style={panel} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-          <strong style={{ fontSize: 16 }}>Settings</strong>
+          <strong style={{ fontSize: 17, fontFamily: 'var(--font-display)', letterSpacing: -0.2 }}>Settings</strong>
           <div style={{ flex: 1 }} />
           <button type="button" style={btn} onClick={onClose} aria-label="Close settings">
             ✕
@@ -423,7 +435,18 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
           <button type="button" style={btn} onClick={onClose}>
             Cancel
           </button>
-          <button type="button" style={{ ...btn, background: '#1e3a8a' }} onClick={save}>
+          <button
+            type="button"
+            style={{
+              ...btn,
+              background: 'linear-gradient(135deg, var(--accent), var(--accent-strong))',
+              border: '1px solid rgba(124,131,255,0.5)',
+              color: '#fff',
+              fontWeight: 600,
+              boxShadow: '0 6px 18px -8px rgba(124,131,255,0.7), inset 0 1px 0 rgba(255,255,255,0.3)',
+            }}
+            onClick={save}
+          >
             Save
           </button>
         </div>

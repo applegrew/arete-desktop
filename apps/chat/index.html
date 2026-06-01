@@ -4,8 +4,116 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>arete chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=JetBrains+Mono:wght@400;500&family=Onest:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <style>
+      :root {
+        /* Aurora Glass design tokens */
+        --bg-0: #070710;
+        --accent: #7c83ff;
+        --accent-2: #22d3ee;
+        --accent-strong: #5b63f5;
+
+        --glass: rgba(255, 255, 255, 0.055);
+        --glass-2: rgba(255, 255, 255, 0.085);
+        --glass-3: rgba(255, 255, 255, 0.12);
+        --glass-border: rgba(255, 255, 255, 0.1);
+        --glass-border-2: rgba(255, 255, 255, 0.18);
+        --hairline: rgba(255, 255, 255, 0.07);
+
+        --text: rgba(236, 238, 252, 0.95);
+        --text-dim: rgba(214, 219, 245, 0.58);
+        --text-faint: rgba(214, 219, 245, 0.36);
+
+        --blur: blur(22px) saturate(165%);
+        --blur-strong: blur(40px) saturate(180%);
+        --shadow: 0 10px 34px -8px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3);
+        --shadow-lg: 0 24px 70px -12px rgba(3, 4, 18, 0.7);
+        --radius: 16px;
+        --radius-sm: 11px;
+
+        --font-display: 'Bricolage Grotesque', 'Onest', ui-sans-serif, system-ui, sans-serif;
+        --font-body: 'Onest', ui-sans-serif, system-ui, -apple-system, sans-serif;
+        --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+      }
+
+      * { box-sizing: border-box; }
+
       html, body, #root { margin: 0; height: 100%; }
+
+      body {
+        font-family: var(--font-body);
+        color: var(--text);
+        background-color: var(--bg-0);
+        /* Aurora mesh: layered radial blobs. */
+        background-image:
+          radial-gradient(38% 52% at 12% 8%, rgba(124, 131, 255, 0.40), transparent 60%),
+          radial-gradient(42% 46% at 88% 14%, rgba(34, 211, 238, 0.26), transparent 62%),
+          radial-gradient(46% 50% at 78% 88%, rgba(217, 70, 160, 0.24), transparent 60%),
+          radial-gradient(40% 44% at 18% 92%, rgba(99, 102, 241, 0.30), transparent 60%),
+          radial-gradient(70% 70% at 50% 50%, rgba(10, 12, 32, 0), rgba(5, 6, 18, 0.6) 100%);
+        background-attachment: fixed;
+        overflow: hidden;
+      }
+
+      /* Slow living drift of the aurora. */
+      body::after {
+        content: '';
+        position: fixed;
+        inset: -25%;
+        z-index: -2;
+        pointer-events: none;
+        background-image:
+          radial-gradient(30% 36% at 30% 30%, rgba(124, 131, 255, 0.16), transparent 60%),
+          radial-gradient(28% 32% at 72% 64%, rgba(34, 211, 238, 0.14), transparent 60%);
+        animation: aurora-drift 26s ease-in-out infinite alternate;
+      }
+
+      @keyframes aurora-drift {
+        0%   { transform: translate3d(-4%, -2%, 0) scale(1); }
+        100% { transform: translate3d(5%, 4%, 0) scale(1.12); }
+      }
+
+      /* Fine grain overlay for tactile depth. */
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        opacity: 0.5;
+        mix-blend-mode: overlay;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        body::after { animation: none; }
+      }
+
+      /* Frosted scrollbars */
+      *::-webkit-scrollbar { width: 10px; height: 10px; }
+      *::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 999px;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+      }
+      *::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); background-clip: padding-box; }
+      *::-webkit-scrollbar-track { background: transparent; }
+
+      ::selection { background: rgba(124, 131, 255, 0.4); color: #fff; }
+
+      input, button, textarea, select { font-family: var(--font-body); }
+      input::placeholder, textarea::placeholder { color: var(--text-faint); }
+
+      @keyframes glass-rise {
+        from { opacity: 0; transform: translateY(8px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
     </style>
   </head>
   <body>

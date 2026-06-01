@@ -152,18 +152,21 @@ export function Shell({
           flexDirection: 'column',
           height: '100vh',
           width: '100vw',
-          background: '#0a0a0a',
-          color: '#eee',
-          fontFamily: 'system-ui, -apple-system, sans-serif',
+          background: 'transparent',
+          color: 'var(--text, #eee)',
+          fontFamily: 'var(--font-body, system-ui, -apple-system, sans-serif)',
         }}
       >
         {topBar && (
           <header
             style={{
               flexShrink: 0,
-              borderBottom: '1px solid #2a2a2a',
-              background: '#111',
-              padding: '8px 16px',
+              borderBottom: '1px solid var(--hairline, #2a2a2a)',
+              background: 'var(--glass, #111)',
+              backdropFilter: 'var(--blur)',
+              WebkitBackdropFilter: 'var(--blur)',
+              padding: '10px 18px',
+              boxShadow: '0 1px 0 rgba(255,255,255,0.05) inset',
             }}
           >
             {topBar}

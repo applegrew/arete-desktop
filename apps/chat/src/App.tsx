@@ -509,10 +509,15 @@ export function App() {
         <div
           style={{
             marginTop: 8,
-            background: '#0a0a0a',
-            padding: 6,
-            borderRadius: 4,
-            border: inMotion ? '2px solid #D97706' : undefined,
+            background: 'rgba(8,9,22,0.45)',
+            backdropFilter: 'var(--blur)',
+            WebkitBackdropFilter: 'var(--blur)',
+            padding: 10,
+            borderRadius: 12,
+            border: inMotion ? '1.5px solid #fbbf24' : '1px solid var(--glass-border)',
+            boxShadow: inMotion
+              ? '0 0 22px -4px rgba(251,191,36,0.5)'
+              : 'inset 0 1px 0 rgba(255,255,255,0.06)',
           }}
         >
           <DiffOverlay router={router} surfaceId={surfaceId} placement="inline">
@@ -544,13 +549,16 @@ export function App() {
   }));
 
   const btnStyle: React.CSSProperties = {
-    background: '#1f2937',
-    color: '#eee',
-    border: '1px solid #333',
-    borderRadius: 4,
-    padding: '4px 10px',
-    fontSize: 12,
+    background: 'var(--glass-2)',
+    color: 'var(--text)',
+    border: '1px solid var(--glass-border)',
+    borderRadius: 999,
+    padding: '6px 14px',
+    fontSize: 12.5,
+    fontWeight: 500,
     cursor: 'pointer',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
+    transition: 'background 0.18s ease, border-color 0.18s ease',
   };
 
   return (
@@ -566,12 +574,40 @@ export function App() {
           renderSurface: renderChatSurface,
         }}
         topBar={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <strong>arete</strong>
-            <span style={{ color: '#777', fontSize: 12 }}>chat · agent-mutable pages</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <span
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontWeight: 700,
+                fontSize: 19,
+                letterSpacing: -0.3,
+                background: 'linear-gradient(120deg, #fff 10%, var(--accent) 60%, var(--accent-2) 100%)',
+                WebkitBackgroundClip: 'text',
+                backgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              arete
+            </span>
+            <span style={{ color: 'var(--text-faint)', fontSize: 12, letterSpacing: 0.2 }}>
+              chat · agent-mutable pages
+            </span>
             <div style={{ flex: 1 }} />
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 12, cursor: 'pointer' }}>
-              <input type="checkbox" checked={diffsGated} onChange={(e) => applyGateDiffs(e.target.checked)} />
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                color: 'var(--text-dim)',
+                fontSize: 12.5,
+                cursor: 'pointer',
+                padding: '6px 12px',
+                borderRadius: 999,
+                background: 'var(--glass)',
+                border: '1px solid var(--glass-border)',
+              }}
+            >
+              <input type="checkbox" checked={diffsGated} onChange={(e) => applyGateDiffs(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
               Gate diffs
             </label>
             <button type="button" style={btnStyle} onClick={() => setSettingsOpen(true)} aria-label="Settings">
@@ -584,7 +620,14 @@ export function App() {
             )}
             <button
               type="button"
-              style={{ ...btnStyle, background: '#1e3a8a' }}
+              style={{
+                ...btnStyle,
+                background: 'linear-gradient(135deg, var(--accent), var(--accent-strong))',
+                border: '1px solid rgba(124,131,255,0.5)',
+                color: '#fff',
+                fontWeight: 600,
+                boxShadow: '0 6px 18px -8px rgba(124,131,255,0.7), inset 0 1px 0 rgba(255,255,255,0.3)',
+              }}
               onClick={() => {
                 const id = createPageLocal({ title: `Page ${pagesRef.current.length + 1}` });
                 setShellState((s) => ({ ...s, activeTabId: id }));
