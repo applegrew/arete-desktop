@@ -66,7 +66,7 @@ function isHtmlMime(m?: string): boolean {
 }
 
 /** Pull MCP-UI resources out of a tool result's content array (resource + resource_link). */
-function extractUiResources(toolName: string, content: Array<Record<string, unknown>>): McpUiResource[] {
+export function extractUiResources(toolName: string, content: Array<Record<string, unknown>>): McpUiResource[] {
   const out: McpUiResource[] = [];
   for (const c of content) {
     if (c.type === 'resource' && c.resource && typeof c.resource === 'object') {
