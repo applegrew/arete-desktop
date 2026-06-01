@@ -73,13 +73,13 @@ function parseConfig(raw: string): McpConfig {
       throw new Error(`Invalid mcp.json: server "${name}" must be an object`);
     }
     const e = entry as Record<string, unknown>;
-    if (!isHttpConfig(e as McpServerEntry) && typeof e.command !== 'string') {
+    if (!isHttpConfig(e as unknown as McpServerEntry) && typeof e.command !== 'string') {
       throw new Error(
         `Invalid mcp.json: server "${name}" must have "command" (stdio) or "url" (http/sse)`,
       );
     }
   }
-  return parsed as McpConfig;
+  return parsed as unknown as McpConfig;
 }
 
 function applyEnvOverrides(config: McpConfig): McpConfig {

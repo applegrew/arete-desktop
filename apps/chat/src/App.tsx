@@ -35,8 +35,12 @@ import {
   loadState,
   saveState,
   getAgentHealth,
+  loadSettings,
+  saveSettings,
   type ApiPage,
+  type AgentSettings,
 } from './persistence';
+import { SettingsPanel } from './SettingsPanel';
 
 const DEFAULT_LAYOUT: LayoutDescriptor = {
   kind: 'grid',
@@ -76,6 +80,9 @@ export function App() {
   const chatStore = useMemo(() => new ChatStore(), []);
 
   const [diffsGated, setDiffsGated] = useState(true);
+  const [settings, setSettings] = useState<AgentSettings | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [pages, setPages] = useState<ApiPage[]>([]);
   const pagesRef = useRef<ApiPage[]>([]);
   pagesRef.current = pages;
@@ -179,6 +186,21 @@ export function App() {
     [commitPages],
   );
 
+  // Gate-diffs is mirrored from settings; toggling it (top bar or panel) persists.
+  const applyGateDiffs = useCallback((v: boolean) => {
+    setDiffsGated(v);
+    setSettings((s) => (s ? { ...s, gateDiffs: v } : s));
+    saveSettings({ gateDiffs: v }).catch(() => {});
+  }, []);
+
+  const handleSaveSettings = useCallback((next: AgentSettings) => {
+    setSettings(next);
+    setDiffsGated(next.gateDiffs);
+    saveSettings(next).then((merged) => {
+      if (merged) setSettings(merged);
+    });
+  }, []);
+
   const pendingByTabId = useMemo<Record<string, boolean>>(() => {
     const p: Record<string, boolean> = {};
     const sidToPage: Record<string, string> = {};
@@ -256,6 +278,14 @@ export function App() {
     if (didLoadRef.current) return;
     didLoadRef.current = true;
     (async () => {
+      // 0. Settings → seed gate-diffs before we gate any pinned surfaces below.
+      const loadedSettings = await loadSettings();
+      const gate = loadedSettings?.gateDiffs ?? true;
+      if (loadedSettings) {
+        setSettings(loadedSettings);
+        setDiffsGated(gate);
+      }
+
       // 1. Surfaces → replay into the live processor (createSurface → update → dataModel).
       const surfaces = await loadSurfaces();
       for (const s of surfaces) {
@@ -281,7 +311,7 @@ export function App() {
       for (const pg of ps) {
         for (const sid of Object.keys(pg.mapping)) {
           pinnedSurfaceIdsRef.current.add(sid);
-          if (diffsGated) router.gateSurface(sid);
+          if (gate) router.gateSurface(sid);
         }
       }
       setRouterTick((n) => n + 1);
@@ -297,7 +327,9 @@ export function App() {
       if (st && typeof st.activeTabId === 'string') {
         setShellState((s) => ({ ...s, activeTabId: st.activeTabId as string }));
       }
-      void getAgentHealth();
+      getAgentHealth()
+        .then((h) => setAvailableModels(h.available ?? []))
+        .catch(() => {});
     })().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -524,9 +556,12 @@ export function App() {
             <span style={{ color: '#777', fontSize: 12 }}>chat · agent-mutable pages</span>
             <div style={{ flex: 1 }} />
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 12, cursor: 'pointer' }}>
-              <input type="checkbox" checked={diffsGated} onChange={(e) => setDiffsGated(e.target.checked)} />
+              <input type="checkbox" checked={diffsGated} onChange={(e) => applyGateDiffs(e.target.checked)} />
               Gate diffs
             </label>
+            <button type="button" style={btnStyle} onClick={() => setSettingsOpen(true)} aria-label="Settings">
+              ⚙️ Settings
+            </button>
             {shellState.activeTabId !== 'chat' && (
               <button type="button" style={btnStyle} onClick={() => deletePageLocal(shellState.activeTabId as string)}>
                 Delete page
@@ -549,6 +584,15 @@ export function App() {
         pendingByTabId={pendingByTabId}
         actionHarness={actionHarness}
       />
+      {settings && (
+        <SettingsPanel
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          settings={settings}
+          availableModels={availableModels}
+          onSave={handleSaveSettings}
+        />
+      )}
     </MarkdownContext.Provider>
   );
 }

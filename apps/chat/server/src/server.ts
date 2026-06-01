@@ -7,6 +7,9 @@ import { pagesRouter } from './routes/pages';
 import { surfacesRouter } from './routes/surfaces';
 import { chatRouter } from './routes/chat';
 import { stateRouter } from './routes/state';
+import { createSettingsRouter } from './routes/settings';
+import { getStore } from './db';
+import { defaultSettings, resolveSettings, settingsToRuntimeOptions } from './settings';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -15,13 +18,25 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8787;
 app.use(cors());
 app.use(express.json({ limit: '4mb' }));
 
+// Seed settings from env + mcp.json on first boot so behavior matches prior defaults.
+const seedMcp = loadMcpConfig();
+const store = getStore();
+if (!store.getSettings()) store.saveSettings(defaultSettings(seedMcp) as unknown as Record<string, unknown>);
+
 app.use('/api/pages', pagesRouter);
 app.use('/api/surfaces', surfacesRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/state', stateRouter);
-// Stateless agent loop (AG-UI SSE + /health) from @arete-ui/agent.
-const mcpConfig = loadMcpConfig();
-app.use('/api/agui', createAgentRouter({ skillsDir: join(__dirname, '..', 'skills'), model: 'gemma4:31b-cloud', mcp: mcpConfig }));
+app.use('/api/settings', createSettingsRouter(seedMcp));
+// Stateless agent loop (AG-UI SSE + /health) from @arete-ui/agent. Model + enabled
+// MCP servers are resolved live from settings on every turn (no restart needed).
+app.use(
+  '/api/agui',
+  createAgentRouter({
+    skillsDir: join(__dirname, '..', 'skills'),
+    resolveOptions: () => settingsToRuntimeOptions(resolveSettings(store, seedMcp)),
+  }),
+);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
