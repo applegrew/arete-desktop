@@ -121,7 +121,18 @@ export class PageOpsHarness {
 
   private applyToRegistration(op: PageOp, pageId: string, reg: PageRegistration): void {
     const prev = reg.getState();
-    const next = runOp(op, prev);
+    let next: { layout: LayoutDescriptor; mapping: PageMapping };
+    try {
+      next = runOp(op, prev);
+    } catch (err) {
+      // A malformed op (e.g. setPageRegion targeting a region the page's layout
+      // doesn't have) must never crash the app — registration flush runs during
+      // React render, where a throw takes down the whole tree. Drop it + warn.
+      console.warn(
+        `[arete] page op "${op.name}" on page "${pageId}" skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
     const diff: PageDiff = {
       kind: 'page-op',
       pageId,

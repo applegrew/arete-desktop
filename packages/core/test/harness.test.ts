@@ -168,6 +168,43 @@ describe('PageOpsHarness — activation for inactive pages', () => {
     expect(state.mapping).toEqual({ s1: 'tl' });
   });
 
+  it('does not crash when a malformed op targets a region the layout lacks (live apply)', () => {
+    const harness = new PageOpsHarness();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let state: State = { layout: twoByTwo, mapping: {} };
+    harness.registerPage('p', { getState: () => state, setState: (n) => { state = n; } });
+    const onProposed = vi.fn();
+    harness.setHooks({ onProposed });
+
+    // Region "main" doesn't exist on the 2x2 grid — must be dropped, not thrown.
+    expect(() =>
+      harness.apply({ name: 'setPageRegion', pageId: 'p', regionId: 'main', surfaceId: 's1' }),
+    ).not.toThrow();
+    expect(harness.hasPending('p')).toBe(false);
+    expect(onProposed).not.toHaveBeenCalled();
+    expect(state.mapping).toEqual({});
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('does not crash when a malformed queued op flushes on registration', () => {
+    const harness = new PageOpsHarness();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    harness.subscribeActivation(() => {});
+
+    // Deferred while the page is unmounted (mirrors the agent emitting a bad
+    // setPageRegion for an inactive tab), then flushed during registration —
+    // the path that previously crashed the app during render.
+    harness.apply({ name: 'setPageRegion', pageId: 'logs', regionId: 'main', surfaceId: 's1' });
+    let state: State = { layout: twoByTwo, mapping: {} };
+    expect(() =>
+      harness.registerPage('logs', { getState: () => state, setState: (n) => { state = n; } }),
+    ).not.toThrow();
+    expect(harness.hasPending('logs')).toBe(false);
+    expect(state.mapping).toEqual({});
+    warn.mockRestore();
+  });
+
   it('does not request activation when the page is already registered', () => {
     const harness = new PageOpsHarness();
     let state: State = { layout: twoByTwo, mapping: {} };
