@@ -7,6 +7,7 @@ export type { AgentRouterOptions } from './agui-router';
 export { buildSystemPrompt } from './prompt';
 export type { AgentContext, McpToolInfo } from './prompt';
 export { getMcpTools, resetMcpTools, getMcpStatus, collectMcpResources } from './mcp';
+export { logLlm, setLlmLogDir } from './llm-log';
 export type { McpServerStatus, McpUiResource } from './mcp';
 export { loadSkills, renderSkillsForPrompt } from './skills';
 export type { Skill } from './skills';

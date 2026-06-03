@@ -6,6 +6,7 @@ import { deepEqual, type AgentMessage } from '@arete-ui/core';
 import { buildSystemPrompt, type AgentContext, type McpToolInfo } from './prompt';
 import { getMcpTools, collectMcpResources, type McpUiResource } from './mcp';
 import { loadSkills, renderSkillsForPrompt } from './skills';
+import { logLlm } from './llm-log';
 
 /** A tool the agent called during a turn (surfaced to the UI as AG-UI TOOL_CALL events). */
 export interface ToolCallRecord {
@@ -81,11 +82,46 @@ export async function agentHealth(
 
 /** Zod mirror of @arete-ui/core's AgentResponse *envelope*. A2UI message
  *  internals stay loose (`z.any()`); they're validated by the domain checks. */
+/** Page layout descriptor (kept loose on region shape, strict on `kind`). */
+const layoutSchema = z.object({
+  kind: z.enum(['grid', 'row', 'column', 'dock']),
+  rows: z.number().optional(),
+  cols: z.number().optional(),
+  regions: z.array(z.object({ id: z.string(), gridArea: z.string().optional() })).optional(),
+});
+
+/**
+ * Page op with a REQUIRED `name` enum + the per-op fields. Giving the op real
+ * structure (vs a free `z.record`) lets constrained decoding force the model to
+ * fill it — a loose record let weak models satisfy the schema with an empty {}.
+ */
+const pageOpSchema = z.object({
+  name: z.enum([
+    'createPage',
+    'deletePage',
+    'setPageProps',
+    'setPageLayout',
+    'pinSurface',
+    'unpinSurface',
+    'moveSurface',
+    'setPageRegion',
+  ]),
+  pageId: z.string().optional(),
+  title: z.string().optional(),
+  icon: z.string().optional(),
+  color: z.string().optional(),
+  surfaceId: z.string().nullable().optional(),
+  regionId: z.string().optional(),
+  targetRegion: z.string().optional(),
+  region: z.string().optional(),
+  layout: layoutSchema.optional(),
+});
+
 const emissionSchema = z.object({
   kind: z.enum(['a2ui', 'pageOp']),
   targetSurfaceId: z.string().optional(),
   messages: z.array(z.any()).optional(),
-  op: z.record(z.string(), z.any()).optional(),
+  op: pageOpSchema.optional(),
 });
 const envelopeSchema = z.object({
   reply: z.string().optional(),
@@ -126,6 +162,8 @@ export async function runAgentTurn(body: AgentTurnRequest, opts?: AgentRuntimeOp
   }
   const model = resolveModel(opts);
   const ctx = context ?? getDefaultContext();
+  const turnId = randomUUID().slice(0, 8);
+  logLlm({ turnId, phase: 'turn.start', model: modelName(opts), promptChars: prompt.length, historyLen: messages?.length ?? 0, prompt });
 
   // Discover MCP tools and extract their metadata for the prompt BEFORE building
   // the system prompt — so the model knows what tools are available during the
@@ -156,8 +194,22 @@ export async function runAgentTurn(body: AgentTurnRequest, opts?: AgentRuntimeOp
   let uiResources: McpUiResource[] = [];
   if (Object.keys(tools).length > 0) {
     try {
+      logLlm({ turnId, phase: 'prestep.request', tools: Object.keys(tools), system: systemPrompt, messages: convo });
       const { resources } = await collectMcpResources(async () => {
         const pre = await generateText({ model, system: systemPrompt, messages: convo, tools, stopWhen: stepCountIs(4) });
+        logLlm({
+          turnId,
+          phase: 'prestep.response',
+          finishReason: pre.finishReason,
+          text: pre.text,
+          steps: pre.steps.map((s) => ({
+            text: s.text,
+            toolCalls: (s.toolCalls ?? []).map((t) => ({ name: t.toolName, input: t.input })),
+            toolResults: ((s.content ?? []) as ReadonlyArray<Record<string, unknown>>)
+              .filter((p) => p.type === 'tool-result' || p.type === 'tool-error')
+              .map((p) => ({ type: p.type, name: p.toolName, output: p.output ?? p.error })),
+          })),
+        });
         // Walk each step's content parts — the authoritative source for tool
         // names, results, AND errors (tool-error parts are NOT in `toolResults`).
         for (const step of pre.steps) {
@@ -180,11 +232,17 @@ export async function runAgentTurn(body: AgentTurnRequest, opts?: AgentRuntimeOp
       });
       uiResources = resources;
     } catch (err) {
+      logLlm({ turnId, phase: 'prestep.error', error: err instanceof Error ? err.message : String(err) });
       console.error('[mcp] tool pre-step skipped:', err);
     }
   }
 
-  const outcome = await runAgentWithCorrection(model, systemPrompt, convo, ctx);
+  const outcome = await runAgentWithCorrection(model, systemPrompt, convo, ctx, turnId);
+  if (outcome.ok) {
+    logLlm({ turnId, phase: 'turn.ok', emissions: outcome.validated.length, reply: outcome.reply, toolCalls: toolCalls.length, uiResources: uiResources.length });
+  } else {
+    logLlm({ turnId, phase: 'turn.failed', status: outcome.status, body: outcome.body });
+  }
   if (outcome.ok) {
     if (toolCalls.length > 0) outcome.toolCalls = toolCalls;
     // Render each captured MCP-UI resource as its own surface (framework-driven,
@@ -220,6 +278,7 @@ async function runAgentWithCorrection(
   systemPrompt: string,
   baseConvo: ModelMessage[],
   ctx: AgentContext,
+  turnId = '-',
 ): Promise<AgentOutcome> {
   const convo: ModelMessage[] = [...baseConvo];
   let corrections = 0;
@@ -227,8 +286,10 @@ async function runAgentWithCorrection(
   while (true) {
     let envelope: Envelope;
     try {
+      logLlm({ turnId, phase: 'envelope.request', attempt: corrections, messages: convo });
       const { object } = await generateObject({ model, schema: envelopeSchema, system: systemPrompt, messages: convo });
       envelope = object;
+      logLlm({ turnId, phase: 'envelope.response', attempt: corrections, envelope });
     } catch (err) {
       if (NoObjectGeneratedError.isInstance(err) && corrections < MAX_CORRECTIONS) {
         corrections++;
@@ -237,6 +298,7 @@ async function runAgentWithCorrection(
           err.cause instanceof Error
             ? err.cause.message
             : String(err.cause ?? 'output was not valid JSON for the required schema');
+        logLlm({ turnId, phase: 'envelope.parse_error', attempt: corrections - 1, cause, rawText: raw });
         convo.push({ role: 'assistant', content: raw || '(previous output was not valid JSON)' });
         convo.push({
           role: 'user',
@@ -245,6 +307,7 @@ async function runAgentWithCorrection(
         continue;
       }
       if (NoObjectGeneratedError.isInstance(err)) {
+        logLlm({ turnId, phase: 'envelope.parse_error_final', message: err.message, rawText: err.text });
         return {
           ok: false,
           status: 502,
@@ -257,6 +320,7 @@ async function runAgentWithCorrection(
     const result = processEmissions(envelope.emissions ?? [], ctx);
 
     if (result.issues.length > 0) {
+      logLlm({ turnId, phase: 'validation.issues', attempt: corrections, issues: result.issues, envelope });
       if (corrections < MAX_CORRECTIONS) {
         corrections++;
         convo.push({ role: 'assistant', content: JSON.stringify(envelope) });
@@ -274,6 +338,7 @@ async function runAgentWithCorrection(
     }
 
     if (result.noops.length > 0) {
+      logLlm({ turnId, phase: 'validation.noops', attempt: corrections, noops: result.noops });
       if (corrections < MAX_CORRECTIONS) {
         corrections++;
         convo.push({ role: 'assistant', content: JSON.stringify(envelope) });
@@ -345,12 +410,51 @@ export function processEmissions(emissions: Array<Record<string, unknown>>, ctx:
         if (allNoop) noops.push(declared);
       }
     } else if (em.kind === 'pageOp') {
-      const op = resolvePlaceholders((em.op ?? {}) as Record<string, unknown>, ctx, lastSurfaceId);
+      const rawOp = (em.op ?? {}) as Record<string, unknown>;
+      const opIssues = validatePageOp(rawOp, ctx);
+      if (opIssues.length > 0) {
+        issues.push(...opIssues);
+        continue;
+      }
+      const op = resolvePlaceholders(rawOp, ctx, lastSurfaceId);
       validated.push({ kind: 'pageOp', op });
     }
   }
 
   return { validated, issues, noops };
+}
+
+/** Required fields per page op (beyond `name`). */
+const PAGE_OP_REQUIRED: Record<string, string[]> = {
+  createPage: ['pageId', 'title'],
+  deletePage: ['pageId'],
+  setPageProps: ['pageId'],
+  setPageLayout: ['pageId', 'layout'],
+  pinSurface: ['surfaceId', 'pageId'],
+  unpinSurface: ['surfaceId', 'pageId'],
+  moveSurface: ['surfaceId', 'pageId', 'targetRegion'],
+  setPageRegion: ['pageId', 'regionId'],
+};
+
+/** Validate a pageOp's name + required fields so a malformed op (e.g. empty {})
+ *  triggers a correction instead of slipping through and breaking the workspace. */
+function validatePageOp(op: Record<string, unknown>, ctx: AgentContext): string[] {
+  const name = typeof op.name === 'string' ? op.name : '';
+  const known = Object.keys(PAGE_OP_REQUIRED);
+  if (!known.includes(name)) {
+    const active = ctx.activeTabId && ctx.activeTabId !== 'chat' ? ` The active page is "${ctx.activeTabId}".` : '';
+    return [
+      `pageOp is missing a valid "name" — use one of [${known.join(', ')}].${active} ` +
+        `For "change the layout", emit {"kind":"pageOp","op":{"name":"setPageLayout","pageId":"<activePageId>","layout":{"kind":"row","regions":[{"id":"left"},{"id":"right"}]}}}. Got: ${JSON.stringify(op)}.`,
+    ];
+  }
+  const missing = (PAGE_OP_REQUIRED[name] ?? []).filter((f) => op[f] === undefined || op[f] === null || op[f] === '');
+  // setPageRegion.surfaceId may legitimately be null (clear a region).
+  if (name === 'setPageRegion' && !('surfaceId' in op)) missing.push('surfaceId');
+  if (missing.length > 0) {
+    return [`pageOp "${name}" is missing required field(s): ${missing.join(', ')}. Got: ${JSON.stringify(op)}.`];
+  }
+  return [];
 }
 
 /** Id-keyed deep comparison of two A2UI component arrays (order-independent). */

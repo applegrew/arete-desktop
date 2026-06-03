@@ -79,6 +79,29 @@ describe('processEmissions', () => {
     expect(r.noops).toEqual(['sfc-1']);
   });
 
+  it('flags an empty/nameless pageOp so the model self-corrects', () => {
+    const r = processEmissions([{ kind: 'pageOp', op: {} }], ctx({ activeTabId: 'logs' }));
+    expect(r.validated).toEqual([]);
+    expect(r.issues.join(' ')).toMatch(/missing a valid "name"/);
+    // Nudges toward the active page id.
+    expect(r.issues.join(' ')).toContain('logs');
+  });
+
+  it('flags a pageOp missing required fields (setPageLayout without layout)', () => {
+    const r = processEmissions([{ kind: 'pageOp', op: { name: 'setPageLayout', pageId: 'logs' } }], ctx());
+    expect(r.validated).toEqual([]);
+    expect(r.issues.join(' ')).toMatch(/missing required field\(s\): layout/);
+  });
+
+  it('passes a well-formed pageOp through', () => {
+    const r = processEmissions(
+      [{ kind: 'pageOp', op: { name: 'setPageLayout', pageId: 'logs', layout: { kind: 'row', regions: [{ id: 'left' }, { id: 'right' }] } } }],
+      ctx(),
+    );
+    expect(r.issues).toEqual([]);
+    expect(pageOp(r.validated[0]).op.name).toBe('setPageLayout');
+  });
+
   it('passes pageOps through and resolves <PLACEHOLDER> surfaceId to the last minted surface', () => {
     const r = processEmissions(
       [
