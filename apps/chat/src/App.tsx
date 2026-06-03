@@ -454,8 +454,12 @@ export function App() {
               router.route(messages as never);
               chatStore.push({ role: 'agent', surfaceId: targetId });
             } else if (emission.kind === 'pageOp') {
-              const op = emission.op as { name: string; pageId?: string; title?: string; icon?: string; color?: string; layout?: LayoutDescriptor };
-              if (op.name === 'createPage') {
+              const op = emission.op as { name?: string; pageId?: string; title?: string; icon?: string; color?: string; layout?: LayoutDescriptor };
+              if (!op || typeof op.name !== 'string') {
+                // Malformed op (e.g. empty {}) — never route it (would switch to a
+                // non-existent tab); tell the user instead of failing silently.
+                chatStore.push({ role: 'system', text: 'Agent emitted an invalid page operation — ignored.' });
+              } else if (op.name === 'createPage') {
                 createPageLocal({ id: op.pageId, title: op.title, layout: op.layout, icon: op.icon, color: op.color });
               } else if (op.name === 'deletePage' && op.pageId) {
                 deletePageLocal(op.pageId);

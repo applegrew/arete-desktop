@@ -45,7 +45,7 @@ describe('applyPinSurface', () => {
 });
 
 describe('applySetPageLayout', () => {
-  it('drops pinned surfaces in regions that no longer exist', () => {
+  it('keeps surviving regions and remaps displaced surfaces to free regions', () => {
     const r = applySetPageLayout(
       { layout: twoByTwo, mapping: { s1: 'tl', s2: 'br' } },
       {
@@ -54,7 +54,29 @@ describe('applySetPageLayout', () => {
         layout: { kind: 'grid', rows: 1, cols: 2, regions: [{ id: 'tl' }, { id: 'right' }] },
       },
     );
-    expect(r.mapping).toEqual({ s1: 'tl' });
+    // s1 keeps 'tl' (still exists); s2's 'br' is gone → remapped to free 'right'.
+    expect(r.mapping).toEqual({ s1: 'tl', s2: 'right' });
+  });
+
+  it('preserves all widgets when switching grid → row (no shared region ids)', () => {
+    const row: LayoutDescriptor = { kind: 'row', regions: [{ id: 'left' }, { id: 'right' }] };
+    const r = applySetPageLayout(
+      { layout: twoByTwo, mapping: { s1: 'tl', s2: 'tr' } },
+      { name: 'setPageLayout', pageId: 'p', layout: row },
+    );
+    // Both surfaces preserved, in visual order → left, right.
+    expect(r.mapping).toEqual({ s1: 'left', s2: 'right' });
+  });
+
+  it('parks overflow in the last region rather than losing it', () => {
+    const dock: LayoutDescriptor = { kind: 'dock', regions: [{ id: 'main' }] };
+    const r = applySetPageLayout(
+      { layout: twoByTwo, mapping: { s1: 'tl', s2: 'tr', s3: 'bl' } },
+      { name: 'setPageLayout', pageId: 'p', layout: dock },
+    );
+    // Every surface retained (none dropped); overflow parked in 'main'.
+    expect(Object.keys(r.mapping).sort()).toEqual(['s1', 's2', 's3']);
+    expect(Object.values(r.mapping).every((rid) => rid === 'main')).toBe(true);
   });
 });
 
@@ -202,6 +224,24 @@ describe('PageOpsHarness — activation for inactive pages', () => {
     ).not.toThrow();
     expect(harness.hasPending('logs')).toBe(false);
     expect(state.mapping).toEqual({});
+    warn.mockRestore();
+  });
+
+  it('ignores a malformed op (no target page) — no activation, no throw, no state change', () => {
+    const harness = new PageOpsHarness();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const activations: string[] = [];
+    harness.subscribeActivation((pageId) => activations.push(pageId));
+    let state: State = { layout: twoByTwo, mapping: {} };
+    harness.registerPage('p', { getState: () => state, setState: (n) => { state = n; } });
+
+    // Empty op (mirrors a small model emitting {kind:'pageOp', op:{}}): must NOT
+    // trigger activation (which would switch the Shell to a non-existent tab).
+    expect(() => harness.apply({} as never)).not.toThrow();
+    expect(activations).toEqual([]);
+    expect(harness.hasPending('p')).toBe(false);
+    expect(state.mapping).toEqual({});
+    expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
 

@@ -98,10 +98,17 @@ export class PageOpsHarness {
   }
 
   apply(op: PageOp): void {
-    const filtered = this.hooks.onPageOp ? this.hooks.onPageOp(op, { pageId: targetPageId(op) }) : op;
+    const filtered = this.hooks.onPageOp ? this.hooks.onPageOp(op, { pageId: targetPageId(op) ?? '' }) : op;
     if (!filtered) return;
 
     const pageId = targetPageId(filtered);
+    // A malformed op (no/unknown `name`, hence no target page) must not trigger
+    // activation — that would switch the Shell to a non-existent tab ("No tab
+    // selected"). Ignore it defensively.
+    if (!pageId) {
+      console.warn('[arete] ignoring page op with no target page id:', JSON.stringify(filtered));
+      return;
+    }
     const reg = this.registrations.get(pageId);
     if (!reg) {
       // The target page's tab isn't active, so its <Page> hasn't mounted/
@@ -175,14 +182,16 @@ export class PageOpsHarness {
   }
 }
 
-function targetPageId(op: PageOp): string {
-  switch (op.name) {
+function targetPageId(op: PageOp): string | undefined {
+  switch (op?.name) {
     case 'pinSurface':
     case 'setPageLayout':
     case 'setPageRegion':
     case 'unpinSurface':
     case 'moveSurface':
       return op.pageId;
+    default:
+      return undefined;
   }
 }
 
