@@ -216,7 +216,7 @@ export function App() {
     const ids = new Set<string>();
     for (const pg of pagesRef.current) {
       const pending = harness.getPending(pg.id);
-      if (pending?.op.name === 'pinSurface') ids.add(pending.op.surfaceId);
+      for (const op of pending?.ops ?? []) if (op.name === 'pinSurface') ids.add(op.surfaceId);
     }
     return ids;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -241,11 +241,20 @@ export function App() {
               ? `Applied changes to ${deriveSurfaceLabel(router.getLiveSurface(d.surfaceId))}.`
               : `approved ${d.op.name}`,
         });
-        if (d.kind === 'page-op' && d.op.name === 'pinSurface') {
-          pinnedSurfaceIdsRef.current.add(d.op.surfaceId);
-          // Keep the chat entry — renderChatSurface replaces it with a "moved to
-          // <page>" placeholder once the surface is mapped onto a page.
-          if (diffsGated) router.gateSurface(d.op.surfaceId);
+        if (d.kind === 'page-op') {
+          // A batch may pin/place several surfaces. Track each surface placed on a
+          // page so future agent edits to it are gated; the chat entry stays and
+          // renderChatSurface turns it into a "moved to <page>" placeholder.
+          for (const op of d.ops) {
+            const sid =
+              op.name === 'pinSurface' || op.name === 'moveSurface' || op.name === 'setPageRegion'
+                ? op.surfaceId
+                : undefined;
+            if (typeof sid === 'string') {
+              pinnedSurfaceIdsRef.current.add(sid);
+              if (diffsGated) router.gateSurface(sid);
+            }
+          }
         }
       },
       onReject: (d: Diff) => {

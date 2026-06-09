@@ -149,79 +149,66 @@ export function Page(props: PageProps) {
   const pending = harness?.getPending(pageId);
   const showingGhost = pending != null && pendingPageDiff === '1';
 
-  const isLayoutChange = useMemo(() => {
-    if (!pending) return false;
-    const a = pending.prev.layout;
-    const b = pending.next.layout;
-    if (a.kind !== b.kind) return true;
-    if (a.kind === 'grid' && b.kind === 'grid') {
-      if (a.rows !== b.rows || a.cols !== b.cols) return true;
-      if (a.regions.length !== b.regions.length) return true;
-      const aIds = a.regions.map((r) => r.id).join(',');
-      const bIds = b.regions.map((r) => r.id).join(',');
-      return aIds !== bIds;
-    }
-    if ((a.kind === 'row' || a.kind === 'column' || a.kind === 'dock') && (b.kind === 'row' || b.kind === 'column' || b.kind === 'dock')) {
-      const aIds = a.regions.map((r) => r.id).join(',');
-      const bIds = b.regions.map((r) => r.id).join(',');
-      return aIds !== bIds;
-    }
-    return false;
-  }, [pending]);
-
-  const changedRegions = useMemo(() => {
+  // Region ids whose content differs between the committed and proposed state —
+  // highlighted in the preview so the user sees exactly what's being added/moved.
+  const changedRegionIds = useMemo(() => {
     const set = new Set<string>();
-    if (!pending || isLayoutChange) return set;
+    if (!pending) return set;
     const prevR2S = new Map<string, string>();
     for (const [sid, rid] of Object.entries(pending.prev.mapping)) prevR2S.set(rid, sid);
     const nextR2S = new Map<string, string>();
     for (const [sid, rid] of Object.entries(pending.next.mapping)) nextR2S.set(rid, sid);
-    const all = new Set([...prevR2S.keys(), ...nextR2S.keys()]);
-    for (const rid of all) {
-      if (prevR2S.get(rid) !== nextR2S.get(rid)) set.add(rid);
+    for (const r of pending.next.layout.regions) {
+      if (prevR2S.get(r.id) !== nextR2S.get(r.id)) set.add(r.id);
     }
     return set;
-  }, [pending, isLayoutChange]);
-
-  const nextRegionToSurfaceId = useMemo(() => {
-    const map = new Map<string, string>();
-    if (!pending) return map;
-    for (const [sid, rid] of Object.entries(pending.next.mapping)) map.set(rid, sid);
-    return map;
   }, [pending]);
 
-  const renderRegionWithDiff = (regionId: string): ReactNode => {
-    const isChanged = changedRegions.has(regionId);
-    if (!isChanged) {
-      return renderSurfaceFor(regionId, 'live');
-    }
-    // Region is changing — render NEXT state with a yellow dashed border + ghost styling.
-    const nextSurfaceId = nextRegionToSurfaceId.get(regionId);
-    const liveSurface = nextSurfaceId ? live.model.getSurface(nextSurfaceId) : undefined;
+  // Region → surface for whichever state we're rendering (proposed while previewing).
+  const previewR2S = useMemo(() => {
+    const map = new Map<string, string>();
+    const src = showingGhost && pending ? pending.next.mapping : mapping;
+    for (const [sid, rid] of Object.entries(src)) map.set(rid, sid);
+    return map;
+  }, [showingGhost, pending, mapping]);
+
+  // WYSIWYG preview of the proposed page: renders the REAL surfaces in their
+  // proposed regions (no surface-id text, no overlap with the old layout), with a
+  // dashed highlight on regions that changed.
+  const renderRegionPreview = (regionId: string): ReactNode => {
+    const surfaceId = previewR2S.get(regionId);
+    const liveSurface = surfaceId ? live.model.getSurface(surfaceId) : undefined;
+    const inner = liveSurface ? (
+      <SurfaceIdProvider surfaceId={surfaceId!}>
+        <A2uiSurface surface={liveSurface} />
+      </SurfaceIdProvider>
+    ) : (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100%',
+          color: 'var(--text-faint, #555)',
+          fontSize: 12,
+          fontStyle: 'italic',
+        }}
+      >
+        (empty)
+      </div>
+    );
+    if (!changedRegionIds.has(regionId)) return inner;
     return (
       <div
         style={{
           height: '100%',
           border: '2px dashed #eab308',
-          borderRadius: 4,
+          borderRadius: 8,
           padding: 4,
           boxSizing: 'border-box',
-          opacity: 0.85,
         }}
       >
-        {liveSurface ? <A2uiSurface surface={liveSurface} /> : (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            color: '#eab308',
-            fontSize: 12,
-            fontStyle: 'italic',
-          }}>
-            (empty)
-          </div>
-        )}
+        {inner}
       </div>
     );
   };
@@ -291,70 +278,13 @@ export function Page(props: PageProps) {
           </button>
         </div>
       )}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          opacity: showingGhost && isLayoutChange ? 0.45 : 1,
-        }}
-      >
+      <div style={{ flex: 1, minHeight: 0 }}>
         <RegionLayout
-          layout={layout}
-          renderRegion={showingGhost ? renderRegionWithDiff : (rid) => renderSurfaceFor(rid, 'live')}
+          layout={showingGhost && pending ? pending.next.layout : layout}
+          renderRegion={showingGhost ? renderRegionPreview : (rid) => renderSurfaceFor(rid, 'live')}
           highlightRegionId={highlightSurfaceId ? mapping[highlightSurfaceId] : undefined}
         />
       </div>
-      {showingGhost && pending && isLayoutChange && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 44,
-            left: 8,
-            right: 8,
-            bottom: 8,
-            pointerEvents: 'none',
-            border: '2px dashed #eab308',
-            borderRadius: 4,
-            padding: 4,
-          }}
-        >
-          <div style={{ height: '100%' }}>
-            <RegionLayoutGhost layout={pending.next.layout} mapping={pending.next.mapping} />
-          </div>
-        </div>
-      )}
     </div>
-  );
-}
-
-/** Cheap ghost render — region grid + surface IDs as labels, no full A2UI rendering. */
-function RegionLayoutGhost({
-  layout,
-  mapping,
-}: {
-  layout: LayoutDescriptor;
-  mapping: PageMapping;
-}) {
-  const regionToSurface = new Map<string, string>();
-  for (const [sid, rid] of Object.entries(mapping)) regionToSurface.set(rid, sid);
-  return (
-    <RegionLayout
-      layout={layout}
-      renderRegion={(regionId) => (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            color: '#eab308',
-            fontSize: 12,
-            fontFamily: 'monospace',
-          }}
-        >
-          {regionToSurface.get(regionId) ?? '(empty)'}
-        </div>
-      )}
-    />
   );
 }

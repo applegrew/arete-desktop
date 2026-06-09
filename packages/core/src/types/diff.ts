@@ -19,7 +19,10 @@ export interface PageMapping {
 export interface PageDiff {
   kind: 'page-op';
   pageId: string;
+  /** The op that initiated this pending batch (kept stable for labels). */
   op: PageOp;
+  /** All ops composing this pending batch, in apply order (one turn may chain several). */
+  ops: PageOp[];
   prev: {
     layout: LayoutDescriptor;
     mapping: PageMapping;

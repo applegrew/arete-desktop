@@ -127,10 +127,15 @@ export class PageOpsHarness {
   }
 
   private applyToRegistration(op: PageOp, pageId: string, reg: PageRegistration): void {
-    const prev = reg.getState();
+    // Compose a turn's ops: each op applies onto the prior PENDING state (not the
+    // committed state) so dependent ops work — e.g. setPageRegion into a region
+    // that a preceding setPageLayout in the same turn just created. Without this
+    // the later op would compute against the old layout and be dropped.
+    const existing = reg.autoApprove ? undefined : this.pending.get(pageId);
+    const from = existing ? existing.next : reg.getState();
     let next: { layout: LayoutDescriptor; mapping: PageMapping };
     try {
-      next = runOp(op, prev);
+      next = runOp(op, from);
     } catch (err) {
       // A malformed op (e.g. setPageRegion targeting a region the page's layout
       // doesn't have) must never crash the app — registration flush runs during
@@ -140,22 +145,24 @@ export class PageOpsHarness {
       );
       return;
     }
-    const diff: PageDiff = {
-      kind: 'page-op',
-      pageId,
-      op,
-      prev,
-      next,
-    };
 
     if (reg.autoApprove) {
       reg.setState(next);
-      this.hooks.onApprove?.(diff);
+      this.hooks.onApprove?.({ kind: 'page-op', pageId, op, ops: [op], prev: from, next });
       return;
     }
 
+    const diff: PageDiff = {
+      kind: 'page-op',
+      pageId,
+      op: existing ? existing.op : op, // keep the batch's initiating op for labels
+      ops: existing ? [...existing.ops, op] : [op],
+      prev: existing ? existing.prev : from, // original committed state
+      next,
+    };
     this.pending.set(pageId, diff);
-    this.hooks.onProposed?.(diff);
+    // Announce once per batch; later ops just refresh the preview.
+    if (!existing) this.hooks.onProposed?.(diff);
     this.emit();
   }
 

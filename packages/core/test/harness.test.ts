@@ -438,4 +438,33 @@ describe('PageOpsHarness with new ops', () => {
     harness.reject('p');
     expect(state.mapping).toEqual({ s1: 'tl' });
   });
+
+  it('chains a turn\'s ops: setPageLayout then setPageRegion into the NEW region', () => {
+    // Reproduces "add a table to this page": change layout to add a region, then
+    // place a new surface there. The second op must apply onto the first op's
+    // pending state (the new region wouldn't exist against the committed state).
+    const harness = new PageOpsHarness();
+    const dock: LayoutDescriptor = { kind: 'dock', regions: [{ id: 'main' }] };
+    let state: State = { layout: dock, mapping: { s1: 'main' } };
+    harness.registerPage('p', { getState: () => state, setState: (n) => { state = n; } });
+    const onProposed = vi.fn();
+    harness.setHooks({ onProposed });
+
+    harness.apply({
+      name: 'setPageLayout',
+      pageId: 'p',
+      layout: { kind: 'column', regions: [{ id: 'top' }, { id: 'bottom' }] },
+    });
+    harness.apply({ name: 'setPageRegion', pageId: 'p', regionId: 'bottom', surfaceId: 's2' });
+
+    const pending = harness.getPending('p')!;
+    expect(pending.ops.map((o) => o.name)).toEqual(['setPageLayout', 'setPageRegion']);
+    // s1 remapped into the new layout (top), s2 placed in the new bottom region.
+    expect(pending.next.mapping).toEqual({ s1: 'top', s2: 'bottom' });
+    expect(onProposed).toHaveBeenCalledTimes(1); // announced once per batch
+
+    harness.approve('p');
+    expect(state.layout.kind).toBe('column');
+    expect(state.mapping).toEqual({ s1: 'top', s2: 'bottom' });
+  });
 });
