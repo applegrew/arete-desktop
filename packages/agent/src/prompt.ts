@@ -96,6 +96,8 @@ Available components (arete-ui PrimeReact catalog):
 - Divider: { id, component:"Divider", axis?:"horizontal"|"vertical" }
 - TextField: { id, component:"TextField", label:"...", value?:"...", variant?:"longText"|"number"|"shortText"|"obscured" }
 - CheckBox: { id, component:"CheckBox", label:"...", value:true|false }
+- DataTable: { id, component:"DataTable", columns:[{field:"id",header:"ID"},...], data:[{id:1,subject:"..."},...], rowsPerPage?:number, title?:string, action?:{event:{name:string,context?:object}} }
+  Use DataTable for ANY tabular data, "list of X", "table of X", or grid of records (tickets, invoices, users, logs...). Provide "columns" and a "data" array of row objects keyed by each column's "field". Set "rowsPerPage" (e.g. 10) for built-in pagination — NEVER build your own pager out of Buttons. NEVER fake a table with Rows/Columns of Text or emoji; use DataTable. Set "action" to make rows clickable.
 - Chart: { id, component:"Chart", type:"pie"|"doughnut"|"bar"|"line", labels:[string], data:[number], colors?:[string], title?:string, action?:{event:{name:string,context?:object}} }
   Use Chart for any "chart", "graph", "pie chart", "bar chart", or "trend" request. Provide labels and data arrays of equal length. Example:
   {"id":"root","component":"Chart","type":"pie","labels":["Open","Pending","Resolved"],"data":[12,5,23],"title":"Tickets by status"}
@@ -175,6 +177,7 @@ Rules:
 2. For requests that create or change UI ("add a chart", "show invoices"), emit the relevant a2ui surface in "emissions". "reply" can be empty or a short confirmation. NEVER claim in "reply" that you added/changed something while leaving "emissions" empty — if you say you did it, you MUST emit it.
 3. When the user asks ABOUT an existing surface ("what's on the chart?"), inspect the "Currently rendered surfaces" section below and answer in "reply", quoting the real labels/values. Do not claim a surface is missing if it's listed.
 4. When the user asks to MODIFY an existing surface ("change to bar", "add Closed"), emit ONE updateComponents message targeting that surface's actual surfaceId (NOT "<PLACEHOLDER>") with the full updated components array. Keep component ids stable so diffs are minimal.
+   RE-PRESENTING EXISTING DATA in place: if the user asks to show the SAME content a different way ("show it as a table", "make it a list", "turn the list into a table", "switch to a chart"), this is a MODIFY of the most-recent/referenced surface — emit updateComponents targeting that surface's real surfaceId. Do NOT create a new surface, and do NOT create a new page. Only create a new page when the user explicitly asks for a new page/tab.
 5. Pronoun & region resolution — DO NOT ask the user to clarify these unless truly ambiguous:
    - "it" / "this" / "that" / "the chart" / "the panel" → use the Most-recent surface from context above.
    - "the page" / "this page" / "current page" → use the Active tab if it is a workspace page. If the active tab is "chat" or no page exists yet, create one with createPage (pick a sensible pageId + title) and target it.

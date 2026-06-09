@@ -11,8 +11,9 @@ import { TextField } from './components/TextField';
 import { CheckBox } from './components/CheckBox';
 import { Chart, ChartApi } from './components/Chart';
 import { Embed, EmbedApi } from './components/Embed';
+import { DataTable, DataTableApi } from './components/DataTable';
 
-export { Text, Image, Card, Row, Column, Button, Divider, TextField, CheckBox, Chart, ChartApi, Embed, EmbedApi };
+export { Text, Image, Card, Row, Column, Button, Divider, TextField, CheckBox, Chart, ChartApi, Embed, EmbedApi, DataTable, DataTableApi };
 
 const COMPONENT_LIST: ReactComponentImplementation[] = [
   Text,
@@ -26,6 +27,7 @@ const COMPONENT_LIST: ReactComponentImplementation[] = [
   CheckBox,
   Chart,
   Embed,
+  DataTable,
 ];
 
 export const primeReactCatalog = new Catalog<ReactComponentImplementation>(
@@ -46,6 +48,8 @@ export const componentAgentHints: Record<string, string> = {
   TextField:
     'the field value binds through the surface data model (e.g. {path:"/field"}); read the current value from the data model, not from the component spec.',
   CheckBox: 'value is a boolean; like TextField it reflects live data-model state.',
+  DataTable:
+    'the canonical primitive for ANY tabular data or list of records (tickets, invoices, users…). Provide `columns` ([{field, header}]) and `data` (array of row objects keyed by each column `field`). Set `rowsPerPage` for built-in pagination — do NOT build your own pager with buttons. Columns sort by default. Set `action` to make rows clickable (auto-context {row, index}). Prefer this over Rows/Columns of Text or emoji for any grid/list of data.',
   Embed:
     'a sandboxed iframe the FRAMEWORK creates to render MCP-UI tool resources (HTML/URL). Do NOT emit Embed components yourself; they appear automatically when an MCP tool returns UI. You may reference an existing one if the user asks about it.',
 };
