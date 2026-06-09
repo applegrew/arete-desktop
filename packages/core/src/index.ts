@@ -114,13 +114,13 @@ export { DiffOverlay } from './diff/DiffOverlay';
 export type { DiffOverlayProps } from './diff/DiffOverlay';
 export { computeContentDiff, diffIsEmpty } from './diff/diff-engine';
 export { withComponentIds } from './diff/with-component-ids';
-export { ApprovalBar, formatContentDiffMessage } from './diff/ApprovalBar';
+export { ApprovalBar } from './diff/ApprovalBar';
 export type {
   ApprovalBarProps,
   ApprovalBarVariant,
   ApprovalBarPlacement,
-  ContentDiffCounts,
 } from './diff/ApprovalBar';
+export { formatContentDiffMessage, deriveSurfaceLabel, describeContentChange } from './diff/describe';
 export {
   diffPalette,
   liveDim,

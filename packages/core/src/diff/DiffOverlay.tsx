@@ -4,7 +4,8 @@ import type { DiffRouter } from './diff-router';
 import { useComponentRects } from './use-component-rects';
 import { injectDiffStyles } from './style-injector';
 import { diffPalette, liveDim, transitions } from './visual-tokens';
-import { ApprovalBar, formatContentDiffMessage, type ApprovalBarPlacement } from './ApprovalBar';
+import { ApprovalBar, type ApprovalBarPlacement } from './ApprovalBar';
+import { deriveSurfaceLabel, describeContentChange, formatContentDiffMessage } from './describe';
 import { SurfaceIdProvider } from '../action/ActionHarnessContext';
 
 export interface DiffOverlayProps {
@@ -117,11 +118,10 @@ export function DiffOverlay({ router, surfaceId, title, placement = 'overlay', c
         <ApprovalBar
           variant="content"
           placement={placement}
-          message={formatContentDiffMessage(title ?? surfaceId, {
-            added: pending.diff.added.length,
-            changed: pending.diff.changed.length,
-            removed: pending.diff.removed.length,
-          })}
+          message={formatContentDiffMessage(
+            title ?? deriveSurfaceLabel(shadowSurface ?? router.getLiveSurface(surfaceId)),
+            describeContentChange(pending.diff, router.getLiveSurface(surfaceId), shadowSurface),
+          )}
           onApprove={() => router.approve(surfaceId)}
           onReject={() => router.reject(surfaceId)}
         />

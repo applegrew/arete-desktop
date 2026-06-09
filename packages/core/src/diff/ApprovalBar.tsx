@@ -116,25 +116,3 @@ export function ApprovalBar({
   );
 }
 
-export interface ContentDiffCounts {
-  added: number;
-  changed: number;
-  removed: number;
-}
-
-/**
- * Human copy for a content diff. Uses the surface title in single quotes.
- * Format: `Approve changes to '<title>'? N added, M updated, K removed.`
- */
-export function formatContentDiffMessage(title: string, counts: ContentDiffCounts): string {
-  const parts: string[] = [];
-  if (counts.added) parts.push(`${counts.added} ${pluralize(counts.added, 'component')} added`);
-  if (counts.changed) parts.push(`${counts.changed} ${pluralize(counts.changed, 'component')} updated`);
-  if (counts.removed) parts.push(`${counts.removed} ${pluralize(counts.removed, 'component')} removed`);
-  const summary = parts.length ? parts.join(', ') : 'no changes';
-  return `Approve changes to '${title}'? ${summary}.`;
-}
-
-function pluralize(n: number, word: string): string {
-  return n === 1 ? word : `${word}s`;
-}
