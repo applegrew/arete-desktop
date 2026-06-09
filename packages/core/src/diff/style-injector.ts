@@ -19,6 +19,15 @@ const STYLE_CONTENT = `
   .arete-diff-box-changed {
     animation: arete-pulse-amber 2s ease-in-out infinite;
   }
+  @keyframes arete-halo {
+    0%   { box-shadow: 0 0 0 0 rgba(124,131,255,0.0); }
+    30%  { box-shadow: 0 0 0 4px rgba(124,131,255,0.55), 0 0 26px 4px rgba(124,131,255,0.45); }
+    100% { box-shadow: 0 0 0 0 rgba(124,131,255,0.0); }
+  }
+  .arete-halo {
+    animation: arete-halo 1.1s ease-in-out 2;
+    border-radius: var(--radius, 14px);
+  }
 `;
 
 export function injectDiffStyles(): void {

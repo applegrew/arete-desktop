@@ -96,8 +96,9 @@ Available components (arete-ui PrimeReact catalog):
 - Divider: { id, component:"Divider", axis?:"horizontal"|"vertical" }
 - TextField: { id, component:"TextField", label:"...", value?:"...", variant?:"longText"|"number"|"shortText"|"obscured" }
 - CheckBox: { id, component:"CheckBox", label:"...", value:true|false }
-- DataTable: { id, component:"DataTable", columns:[{field:"id",header:"ID"},...], data:[{id:1,subject:"..."},...], rowsPerPage?:number, title?:string, action?:{event:{name:string,context?:object}} }
+- DataTable: { id, component:"DataTable", columns:[{field:"id",header:"ID"},...], data:[{id:1,subject:"..."},...], rowsPerPage?:number, title?:string, action?:{event:{name:string,context?:object}}, lazy?:boolean, first?:number, totalRecords?:number, pageAction?:{event:{name:string}} }
   Use DataTable for ANY tabular data, "list of X", "table of X", or grid of records (tickets, invoices, users, logs...). Provide "columns" and a "data" array of row objects keyed by each column's "field". Set "rowsPerPage" (e.g. 10) for built-in pagination — NEVER build your own pager out of Buttons. NEVER fake a table with Rows/Columns of Text or emoji; use DataTable. Set "action" to make rows clickable.
+  LAZY (server-side) paging for large datasets — do NOT dump hundreds of rows at once. Set "lazy":true, "totalRecords":<total>, "rowsPerPage":<pageSize>, "first":<offset of this page>, a "pageAction", and put ONLY the current page's rows in "data". When you receive a [USER ACTION] for that pageAction (context {first, rows}), reply by updating THIS SAME surface (updateComponents to its surfaceId) with that page's rows and the new "first". Keep "totalRecords" stable.
 - Chart: { id, component:"Chart", type:"pie"|"doughnut"|"bar"|"line", labels:[string], data:[number], colors?:[string], title?:string, action?:{event:{name:string,context?:object}} }
   Use Chart for any "chart", "graph", "pie chart", "bar chart", or "trend" request. Provide labels and data arrays of equal length. Example:
   {"id":"root","component":"Chart","type":"pie","labels":["Open","Pending","Resolved"],"data":[12,5,23],"title":"Tickets by status"}
@@ -162,10 +163,13 @@ Any component MAY carry an optional "action" field shaped like {event: {name: st
 Auto-context shapes per component (what arrives in context):
 - Button click → {} (no payload)
 - Chart segment click → { label, value, index } (the clicked segment's label, numeric value, and zero-based index)
+- DataTable row click → { row, index } (the clicked row object + its zero-based index)
+- DataTable page change (lazy) → { first, rows, page }
 - TextField / CheckBox value change → { value } (not yet implemented for these — coming soon)
-- Other categories (DataTable row, Tree node, Dropdown select, etc.) are future adapter components and follow the same action schema.
 
-When the user asks for interactivity ("clickable", "drill down", "let me click", "make it interactive"), set action on the component. When you receive a follow-up [USER ACTION] prompt, treat it as user intent and respond with the appropriate follow-up surface (e.g., a Card listing records for that segment).
+When the user asks for interactivity ("clickable", "drill down", "let me click", "make it interactive"), set action on the component.
+
+WHERE THE RESULT GOES — IMPORTANT: a [USER ACTION] names the surface it came FROM (the "on surface <sid>" part). By default, respond by UPDATING THAT SAME surface in place (updateComponents to <sid>) — e.g. a row click replaces the table with that record's detail view (master→detail). When you navigate within a surface like this, ALSO include a "Back" Button (action {event:{name:"back"}}) so the user can return; on a "back" action, update the same surface to restore the previous view (e.g. the table). Do NOT spill the result into a brand-new chat surface or a new page unless the user explicitly asks for a separate view. (Pagination via pageAction is the same: update the same surface with the new page.)
 
 Response has THREE channels:
 - "reply"     — the visible conversational text addressed to the user. Required if the user asked a question or sent a greeting.

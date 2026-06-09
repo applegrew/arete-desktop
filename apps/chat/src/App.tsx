@@ -13,6 +13,8 @@ import {
   RenderDiagnosticsStore,
   withComponentIds,
   buildAgentContext,
+  deriveSurfaceLabel,
+  describeContentChange,
   uid,
   type ShellTab,
   type ShellState,
@@ -49,18 +51,6 @@ const DEFAULT_LAYOUT: LayoutDescriptor = {
   cols: 2,
   regions: [{ id: 'top-left' }, { id: 'top-right' }, { id: 'bottom-left' }, { id: 'bottom-right' }],
 };
-
-function describeContentCounts(d: {
-  added: ReadonlyArray<unknown>;
-  changed: ReadonlyArray<unknown>;
-  removed: ReadonlyArray<unknown>;
-}): string {
-  const parts: string[] = [];
-  if (d.added.length) parts.push(`${d.added.length} added`);
-  if (d.changed.length) parts.push(`${d.changed.length} updated`);
-  if (d.removed.length) parts.push(`${d.removed.length} removed`);
-  return parts.length ? parts.join(', ') : 'no changes';
-}
 
 export function App() {
   const currentCatalog = useMemo(() => withComponentIds(primeReactCatalog), []);
@@ -100,6 +90,16 @@ export function App() {
   const recentSurfaceIdsRef = useRef<string[]>([]);
   const handlePromptRef = useRef<(text: string, fromUserAction?: boolean) => void>(() => {});
   const [shellState, setShellState] = useState<ShellState>({ activeTabId: 'chat', chatDockState: 'dock' });
+
+  // Transient halo target — set when locating a surface moved to a page; auto-clears.
+  const [highlightedSurfaceId, setHighlightedSurfaceId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const locateSurface = useCallback((surfaceId: string, pageId: string) => {
+    setShellState((s) => (s.activeTabId === pageId ? s : { ...s, activeTabId: pageId }));
+    setHighlightedSurfaceId(surfaceId);
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => setHighlightedSurfaceId(null), 2400);
+  }, []);
 
   // Bumped on any change that should trigger a debounced save (chat push,
   // surface capture). NOT driven off routerTick — the router only ticks for
@@ -230,17 +230,21 @@ export function App() {
           role: 'system',
           text:
             d.kind === 'content'
-              ? `Agent proposed changes to ${d.surfaceId}: ${describeContentCounts(d)}. Review below.`
+              ? `Agent proposes changes to ${deriveSurfaceLabel(router.getShadowSurface(d.surfaceId) ?? router.getLiveSurface(d.surfaceId))}: ${describeContentChange(d, router.getLiveSurface(d.surfaceId), router.getShadowSurface(d.surfaceId))}. Review below.`
               : `Agent proposed ${d.op.name} on page ${d.pageId}. Review below.`,
         }),
       onApprove: (d: Diff) => {
         chatStore.push({
           role: 'agent',
-          text: d.kind === 'content' ? `approved ${d.surfaceId}` : `approved ${d.op.name}`,
+          text:
+            d.kind === 'content'
+              ? `Applied changes to ${deriveSurfaceLabel(router.getLiveSurface(d.surfaceId))}.`
+              : `approved ${d.op.name}`,
         });
         if (d.kind === 'page-op' && d.op.name === 'pinSurface') {
           pinnedSurfaceIdsRef.current.add(d.op.surfaceId);
-          chatStore.removeBySurfaceId(d.op.surfaceId);
+          // Keep the chat entry — renderChatSurface replaces it with a "moved to
+          // <page>" placeholder once the surface is mapped onto a page.
           if (diffsGated) router.gateSurface(d.op.surfaceId);
         }
       },
@@ -249,7 +253,7 @@ export function App() {
           role: 'system',
           text:
             d.kind === 'content'
-              ? `Changes to '${d.surfaceId}' rejected.`
+              ? `Discarded changes to ${deriveSurfaceLabel(router.getLiveSurface(d.surfaceId))}.`
               : `Layout changes rejected.`,
         });
       },
@@ -260,9 +264,11 @@ export function App() {
         const surfaceClause = action.surfaceId ? ` on surface ${action.surfaceId}` : '';
         const componentClause = action.sourceComponentId ? ` (component ${action.sourceComponentId})` : '';
         const synth = `[USER ACTION] event "${action.name}"${surfaceClause}${componentClause}; context: ${contextStr}`;
-        // Show a compact chip (raw synth kept in `text` for agent history/hover);
-        // pass fromUserAction=true so resulting surface edits apply un-gated.
-        chatStore.push({ role: 'action', text: synth, actionLabel: action.name, surfaceId: action.surfaceId });
+        // Show a compact, PERSISTENT chip (raw synth kept in `text` for agent
+        // history/hover). NOTE: no surfaceId — otherwise removeBySurfaceId (fired
+        // when the origin surface is pinned) would delete this notification.
+        // fromUserAction=true so resulting surface edits apply un-gated.
+        chatStore.push({ role: 'action', text: synth, actionLabel: action.name });
         handlePromptRef.current(synth, true);
       },
     };
@@ -519,6 +525,40 @@ export function App() {
 
   const renderChatSurface = useCallback(
     (surfaceId: string) => {
+      // If this surface has been placed on a page, replace the (redundant) chat
+      // copy with a compact "moved to <page>" placeholder that locates it.
+      const hostPage = pages.find((p) => Object.prototype.hasOwnProperty.call(p.mapping, surfaceId));
+      if (hostPage) {
+        return (
+          <button
+            type="button"
+            onClick={() => locateSurface(surfaceId, hostPage.id)}
+            title={`Show on ${hostPage.title}`}
+            style={{
+              marginTop: 8,
+              width: '100%',
+              textAlign: 'left',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              background: 'rgba(124,131,255,0.10)',
+              border: '1px dashed var(--glass-border-2, rgba(124,131,255,0.35))',
+              borderRadius: 12,
+              padding: '10px 12px',
+              color: 'var(--text-dim)',
+              cursor: 'pointer',
+              fontSize: 12.5,
+            }}
+          >
+            <span aria-hidden style={{ fontSize: 14 }}>📌</span>
+            <span>
+              Moved to <strong style={{ color: 'var(--text)' }}>{hostPage.icon || '📄'} {hostPage.title}</strong>
+            </span>
+            <span style={{ flex: 1 }} />
+            <span style={{ color: 'var(--accent-2, #22d3ee)' }}>Show ↗</span>
+          </button>
+        );
+      }
       const liveSurface = liveProcessor.model.getSurface(surfaceId);
       const inMotion = inMotionSurfaceIds.has(surfaceId);
       return (
@@ -542,7 +582,7 @@ export function App() {
         </div>
       );
     },
-    [router, liveProcessor, inMotionSurfaceIds],
+    [router, liveProcessor, inMotionSurfaceIds, pages, locateSurface],
   );
 
   const tabs: ShellTab[] = pages.map((p) => ({
@@ -560,6 +600,7 @@ export function App() {
         onMappingChange={(m) => updatePageLocal(p.id, { mapping: m })}
         router={router}
         harness={harness}
+        highlightSurfaceId={highlightedSurfaceId}
       />
     ),
   }));

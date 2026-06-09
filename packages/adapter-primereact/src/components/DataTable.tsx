@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
-import { DataTable as PrimeDataTable, type DataTableRowClickEvent } from 'primereact/datatable';
+import { DataTable as PrimeDataTable, type DataTableRowClickEvent, type DataTablePageEvent } from 'primereact/datatable';
 import { Column } from 'primereact/column';
 import { useAction, useReportDiagnostics, type DiagnosticInput } from '@arete-ui/core';
 
@@ -22,17 +22,35 @@ const columnSchema = z.object({
 
 const dataTableSchema = z.object({
   columns: z.array(columnSchema),
-  /** Row objects keyed by the columns' `field`s. */
+  /** Row objects keyed by the columns' `field`s. In lazy mode this is just the current page. */
   data: z.array(z.record(z.unknown())),
-  /** Enables built-in client-side pagination when > 0. */
+  /** Page size. Enables built-in client-side pagination when > 0 (and the page size in lazy mode). */
   rowsPerPage: z.number().optional(),
   title: z.string().optional(),
   weight: z.number().optional(),
+  /**
+   * Server-side / lazy pagination: `data` holds only the current page; the table
+   * shows `totalRecords` total and fires `pageAction` on page change so the agent
+   * (or a data tool) returns the next page. No client-side slicing.
+   */
+  lazy: z.boolean().optional(),
+  /** Zero-based index of the first row in `data` (lazy mode). */
+  first: z.number().optional(),
+  /** Total row count across all pages (lazy mode). */
+  totalRecords: z.number().optional(),
+  /** Show a loading overlay while the next page is being fetched (lazy mode). */
+  loading: z.boolean().optional(),
   /**
    * Optional action fired on row click. Auto-context: `{ row, index }` merged
    * with any spec-declared context.
    */
   action: actionSchema.optional(),
+  /**
+   * Lazy-mode action fired on page change. Auto-context: `{ first, rows, page }`.
+   * The agent should reply by updating this same surface with that page's `data`
+   * and the new `first`.
+   */
+  pageAction: actionSchema.optional(),
 });
 
 export const DataTableApi: ComponentApi<typeof dataTableSchema> = {
@@ -55,7 +73,28 @@ export const DataTable = createComponentImplementation(DataTableApi, ({ props, c
   }
   useReportDiagnostics(context.componentModel.id, diagnostics);
 
-  const paginator = typeof props.rowsPerPage === 'number' && props.rowsPerPage > 0;
+  const lazy = props.lazy === true;
+  const pageAction = props.pageAction;
+  const paginator = lazy || (typeof props.rowsPerPage === 'number' && props.rowsPerPage > 0);
+  const rows = props.rowsPerPage ?? (lazy ? props.data.length || 10 : undefined);
+
+  // Lazy/server-pagination props are spread ONLY in lazy mode — passing them
+  // (even as undefined) in client mode disturbs PrimeReact's internal paging.
+  const lazyProps: Record<string, unknown> = lazy
+    ? {
+        lazy: true,
+        first: props.first ?? 0,
+        totalRecords: props.totalRecords ?? props.data.length,
+        loading: props.loading,
+        onPage: pageAction
+          ? (e: DataTablePageEvent) =>
+              dispatchAction({
+                name: pageAction.event.name,
+                context: { first: e.first, rows: e.rows, page: e.page, ...(pageAction.event.context ?? {}) },
+              })
+          : undefined,
+      }
+    : {};
 
   const style: React.CSSProperties = {
     width: '100%',
@@ -72,7 +111,8 @@ export const DataTable = createComponentImplementation(DataTableApi, ({ props, c
       <PrimeDataTable
         value={props.data}
         paginator={paginator}
-        rows={paginator ? props.rowsPerPage : undefined}
+        rows={paginator ? rows : undefined}
+        {...lazyProps}
         size="small"
         stripedRows
         removableSort

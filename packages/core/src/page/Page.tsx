@@ -25,6 +25,8 @@ export interface PageProps {
   processor?: MessageProcessor<ReactComponentImplementation>;
   /** When provided, the Page registers with the harness so page ops can target it. */
   harness?: PageOpsHarness;
+  /** Surface to briefly highlight (halo) — e.g. when locating a surface moved here from chat. */
+  highlightSurfaceId?: string | null;
 }
 
 export function Page(props: PageProps) {
@@ -39,6 +41,7 @@ export function Page(props: PageProps) {
     router,
     processor,
     harness,
+    highlightSurfaceId,
   } = props;
 
   const live = router?.live ?? processor;
@@ -298,6 +301,7 @@ export function Page(props: PageProps) {
         <RegionLayout
           layout={layout}
           renderRegion={showingGhost ? renderRegionWithDiff : (rid) => renderSurfaceFor(rid, 'live')}
+          highlightRegionId={highlightSurfaceId ? mapping[highlightSurfaceId] : undefined}
         />
       </div>
       {showingGhost && pending && isLayoutChange && (

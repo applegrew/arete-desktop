@@ -1,18 +1,23 @@
 import type { ReactNode } from 'react';
 import { toGridStyle, type LayoutDescriptor } from './layout-descriptor';
+import { injectDiffStyles } from '../diff/style-injector';
 
 export interface RegionLayoutProps {
   layout: LayoutDescriptor;
   renderRegion: (regionId: string) => ReactNode;
+  /** Region to briefly highlight with a halo (e.g. when locating a moved surface). */
+  highlightRegionId?: string;
 }
 
-export function RegionLayout({ layout, renderRegion }: RegionLayoutProps) {
+export function RegionLayout({ layout, renderRegion, highlightRegionId }: RegionLayoutProps) {
+  injectDiffStyles(); // provides the @keyframes arete-halo used below
   return (
     <div style={toGridStyle(layout)}>
       {layout.regions.map((region) => (
         <div
           key={region.id}
           data-region-id={region.id}
+          className={region.id === highlightRegionId ? 'arete-halo' : undefined}
           style={{
             gridArea: layout.kind === 'grid' ? (region.gridArea ?? region.id) : undefined,
             background: 'var(--glass, #0f0f0f)',
