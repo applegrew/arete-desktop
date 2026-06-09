@@ -189,13 +189,6 @@ export function App() {
     [commitPages],
   );
 
-  // Gate-diffs is mirrored from settings; toggling it (top bar or panel) persists.
-  const applyGateDiffs = useCallback((v: boolean) => {
-    setDiffsGated(v);
-    setSettings((s) => (s ? { ...s, gateDiffs: v } : s));
-    saveSettings({ gateDiffs: v }).catch(() => {});
-  }, []);
-
   const handleSaveSettings = useCallback((next: AgentSettings) => {
     setSettings(next);
     setDiffsGated(next.gateDiffs);
@@ -597,23 +590,6 @@ export function App() {
               chat · agent-mutable pages
             </span>
             <div style={{ flex: 1 }} />
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 7,
-                color: 'var(--text-dim)',
-                fontSize: 12.5,
-                cursor: 'pointer',
-                padding: '6px 12px',
-                borderRadius: 999,
-                background: 'var(--glass)',
-                border: '1px solid var(--glass-border)',
-              }}
-            >
-              <input type="checkbox" checked={diffsGated} onChange={(e) => applyGateDiffs(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
-              Gate diffs
-            </label>
             <button type="button" style={btnStyle} onClick={() => setSettingsOpen(true)} aria-label="Settings">
               ⚙️ Settings
             </button>
