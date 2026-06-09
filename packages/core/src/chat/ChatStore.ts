@@ -6,7 +6,7 @@ import {
   type TranscriptOptions,
 } from '../agent/transcript';
 
-export type ChatRole = 'user' | 'agent' | 'system' | 'thought' | 'tool';
+export type ChatRole = 'user' | 'agent' | 'system' | 'thought' | 'tool' | 'action';
 
 export interface ChatEntry {
   id: string;
@@ -19,6 +19,8 @@ export interface ChatEntry {
   toolResult?: string;
   /** True when the tool call failed — toolResult holds the error. */
   toolError?: boolean;
+  /** Friendly label for role === 'action' (the raw synthetic prompt stays in `text`). */
+  actionLabel?: string;
   createdAt: number;
 }
 
@@ -46,6 +48,7 @@ export class ChatStore {
       toolName: entry.toolName,
       toolResult: entry.toolResult,
       toolError: entry.toolError,
+      actionLabel: entry.actionLabel,
       createdAt: Date.now(),
     };
     this.entries = [...this.entries, e];

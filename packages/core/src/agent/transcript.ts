@@ -37,6 +37,9 @@ function mapRole(role: ChatRole, includeThoughts: boolean): AgentRole | null {
   switch (role) {
     case 'user':
       return 'user';
+    case 'action':
+      // A user action (button/row click) is user intent → threaded as a user turn.
+      return 'user';
     case 'agent':
       return 'assistant';
     case 'system':

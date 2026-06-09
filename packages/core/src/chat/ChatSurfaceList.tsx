@@ -91,6 +91,31 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
         if (entry.role === 'tool') {
           return <ToolResultEntry key={entry.id} entry={entry} />;
         }
+        if (entry.role === 'action') {
+          return (
+            <li
+              key={entry.id}
+              style={{
+                alignSelf: 'flex-end',
+                maxWidth: '85%',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '5px 11px',
+                borderRadius: 999,
+                fontSize: 12,
+                color: 'var(--text-dim, #c7d2fe)',
+                background: 'var(--glass, rgba(124,131,255,0.12))',
+                border: '1px solid var(--glass-border, rgba(124,131,255,0.3))',
+                animation: 'glass-rise 0.28s ease both',
+              }}
+              title={entry.text}
+            >
+              <span aria-hidden>⚡</span>
+              <span style={{ fontWeight: 500 }}>{entry.actionLabel ?? 'action'}</span>
+            </li>
+          );
+        }
         const isUser = entry.role === 'user';
         return (
           <li

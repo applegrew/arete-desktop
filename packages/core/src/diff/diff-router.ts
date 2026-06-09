@@ -64,6 +64,22 @@ export class DiffRouter {
     this.gated.add(surfaceId);
   }
 
+  /** Mirror the current live surface into the shadow processor so a subsequent
+   *  gated update diffs against real prior state (not an empty shadow). */
+  private seedShadowFromLive(surfaceId: string): void {
+    const liveSurface = this.live.model.getSurface(surfaceId);
+    if (!liveSurface) return;
+    const components: Array<Record<string, unknown>> = [];
+    for (const [id, comp] of liveSurface.componentsModel.entries) {
+      components.push({ id, component: comp.type, ...(comp.properties as Record<string, unknown>) });
+    }
+    const seed = [
+      { version: 'v0.9', createSurface: { surfaceId, catalogId: liveSurface.catalog.id, sendDataModel: true } },
+      { version: 'v0.9', updateComponents: { surfaceId, components } },
+    ] as unknown as A2uiMessage[];
+    this.shadow.processMessages(seed);
+  }
+
   ungateSurface(surfaceId: string): void {
     this.gated.delete(surfaceId);
   }
@@ -123,6 +139,15 @@ export class DiffRouter {
     if (liveBatch.length > 0) this.live.processMessages(liveBatch);
 
     for (const [sid, batch] of shadowBatchBySurface) {
+      // Gating a MODIFICATION to a surface that exists only in `live` (created or
+      // restored earlier): seed the shadow with the current live state first, so
+      // the diff reflects live→proposed. Without this, an updateComponents would
+      // apply to an empty shadow and produce no meaningful diff (so the change
+      // would appear ungated).
+      const batchCreates = batch.some((m) => 'createSurface' in m);
+      if (!batchCreates && !this.shadow.model.getSurface(sid) && this.live.model.getSurface(sid)) {
+        this.seedShadowFromLive(sid);
+      }
       this.shadow.processMessages(batch);
       const existing = this.pending.get(sid);
       const bufferedMessages = existing ? [...existing.bufferedMessages, ...batch] : batch;

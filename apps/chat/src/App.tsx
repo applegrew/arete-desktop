@@ -20,6 +20,7 @@ import {
   type Diff,
   type UserAction,
   type SurfaceSnapshot,
+  type ChatRole,
 } from '@arete-ui/core';
 import { primeReactCatalog, componentAgentHints } from '@arete-ui/adapter-primereact';
 import { streamAgent } from './agui-client';
@@ -97,7 +98,7 @@ export function App() {
   const pinnedSurfaceIdsRef = useRef<Set<string>>(new Set());
   const surfaceContentsRef = useRef<Record<string, unknown[]>>({});
   const recentSurfaceIdsRef = useRef<string[]>([]);
-  const handlePromptRef = useRef<(text: string) => void>(() => {});
+  const handlePromptRef = useRef<(text: string, fromUserAction?: boolean) => void>(() => {});
   const [shellState, setShellState] = useState<ShellState>({ activeTabId: 'chat', chatDockState: 'dock' });
 
   // Bumped on any change that should trigger a debounced save (chat push,
@@ -259,8 +260,10 @@ export function App() {
         const surfaceClause = action.surfaceId ? ` on surface ${action.surfaceId}` : '';
         const componentClause = action.sourceComponentId ? ` (component ${action.sourceComponentId})` : '';
         const synth = `[USER ACTION] event "${action.name}"${surfaceClause}${componentClause}; context: ${contextStr}`;
-        chatStore.push({ role: 'user', text: synth });
-        handlePromptRef.current(synth);
+        // Show a compact chip (raw synth kept in `text` for agent history/hover);
+        // pass fromUserAction=true so resulting surface edits apply un-gated.
+        chatStore.push({ role: 'action', text: synth, actionLabel: action.name, surfaceId: action.surfaceId });
+        handlePromptRef.current(synth, true);
       },
     };
     router.setHooks(sharedHooks);
@@ -312,10 +315,19 @@ export function App() {
       }
       setRouterTick((n) => n + 1);
 
-      // 3. Chat transcript.
+      // 3. Chat transcript. Re-derive the action chip label from the persisted
+      //    synthetic text so restored action entries stay masked (not raw).
       const chat = await loadChat();
       for (const e of chat) {
-        chatStore.push({ role: e.role as 'user' | 'agent' | 'system', text: e.text, surfaceId: e.surfaceId, id: e.id });
+        const actionLabel =
+          e.role === 'action' ? (/event "([^"]+)"/.exec(e.text ?? '')?.[1] ?? 'action') : undefined;
+        chatStore.push({
+          role: e.role as ChatRole,
+          text: e.text,
+          surfaceId: e.surfaceId,
+          id: e.id,
+          actionLabel,
+        });
       }
 
       // 4. App state (active tab + chat dock position).
@@ -379,7 +391,7 @@ export function App() {
 
   // --- prompt → AG-UI stream → diff pipeline -------------------------------
   const handlePrompt = useCallback(
-    async (text: string) => {
+    async (text: string, fromUserAction = false) => {
       const activePage = pagesRef.current.find((p) => p.id === shellState.activeTabId);
       const activeMapping = activePage?.mapping ?? {};
       const surfacesPayload: Record<string, SurfaceSnapshot> = {};
@@ -441,8 +453,15 @@ export function App() {
             if (emission.kind === 'a2ui') {
               const targetId = emission.targetSurfaceId;
               const messages = emission.messages as unknown[];
-              const isPinned = targetId && pinnedSurfaceIdsRef.current.has(targetId);
-              if (diffsGated && isPinned) router.gateSurface(targetId);
+              const hasCreate = messages.some((m) => !!m && typeof m === 'object' && 'createSurface' in (m as object));
+              const isExisting =
+                !!targetId &&
+                (surfaceContentsRef.current[targetId] !== undefined || liveProcessor.model.getSurface(targetId) != null);
+              // Gate only MODIFICATIONS to an existing surface, and only when NOT
+              // triggered by a user action (those apply directly). Brand-new
+              // surfaces (createSurface) render straight into the chat scroll.
+              const isModification = isExisting && !hasCreate;
+              if (diffsGated && isModification && !fromUserAction) router.gateSurface(targetId);
               captureSurfaceContents(messages);
               router.route(messages as never);
               chatStore.push({ role: 'agent', surfaceId: targetId });
