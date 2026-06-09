@@ -432,7 +432,7 @@ export function App() {
       const priorMessages =
         last && last.role === 'user' && last.content === text ? allMessages.slice(0, -1) : allMessages;
 
-      const askingEntry = chatStore.push({ role: 'system', text: 'Asking agent...' });
+      const askingEntry = chatStore.push({ role: 'system', text: 'Asking the agent', pending: true });
       let cleared = false;
       const clearAsking = () => {
         if (cleared) return;

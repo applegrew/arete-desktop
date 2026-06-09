@@ -21,6 +21,8 @@ export interface ChatEntry {
   toolError?: boolean;
   /** Friendly label for role === 'action' (the raw synthetic prompt stays in `text`). */
   actionLabel?: string;
+  /** Transient "working" status (e.g. waiting on the agent) — rendered as an animated indicator. */
+  pending?: boolean;
   createdAt: number;
 }
 
@@ -49,6 +51,7 @@ export class ChatStore {
       toolResult: entry.toolResult,
       toolError: entry.toolError,
       actionLabel: entry.actionLabel,
+      pending: entry.pending,
       createdAt: Date.now(),
     };
     this.entries = [...this.entries, e];

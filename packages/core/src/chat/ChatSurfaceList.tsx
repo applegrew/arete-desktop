@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useState } from 'react';
+import { useState, useRef, useMemo, useEffect, useLayoutEffect } from 'react';
 import { useChatEntries, type ChatStore } from './ChatStore';
 
 export interface ChatSurfaceListProps {
@@ -9,6 +9,62 @@ export interface ChatSurfaceListProps {
 
 export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) {
   const entries = useChatEntries(store);
+
+  // Chat-app scroll: pin the most-recent *typed* user message to the top edge
+  // (its reply streams below). Fires on a new user message and on initial load.
+  const olRef = useRef<HTMLOListElement>(null);
+  const spacerRef = useRef<HTMLLIElement>(null);
+  const lastUserId = useMemo(() => {
+    for (let i = entries.length - 1; i >= 0; i--) if (entries[i]!.role === 'user') return entries[i]!.id;
+    return undefined;
+  }, [entries]);
+  const pinnedUserId = useRef<string | undefined>(undefined);
+
+  // Keep the trailing spacer just tall enough that the pinned user message can
+  // reach the top even when its reply is short (no extra gap once the reply fills it).
+  const recomputeSpacer = () => {
+    const ol = olRef.current;
+    const spacer = spacerRef.current;
+    if (!ol || !spacer || !lastUserId) return;
+    const el = ol.querySelector<HTMLElement>(`[data-entry-id="${cssEscape(lastUserId)}"]`);
+    if (!el) return;
+    // Measure WITHOUT zeroing the spacer first — temporarily shrinking the
+    // scrollHeight would make the browser clamp scrollTop (losing the pin).
+    const spacerH = spacer.offsetHeight;
+    const contentBelow = ol.scrollHeight - spacerH - el.offsetTop; // last user msg + everything after it
+    spacer.style.height = `${Math.max(0, ol.clientHeight - contentBelow)}px`;
+  };
+
+  const scrollPinned = () => {
+    const ol = olRef.current;
+    if (!ol || !lastUserId) return;
+    const el = ol.querySelector<HTMLElement>(`[data-entry-id="${cssEscape(lastUserId)}"]`);
+    if (el) ol.scrollTop = Math.max(0, el.offsetTop - 8);
+  };
+
+  useLayoutEffect(() => {
+    recomputeSpacer();
+    if (pinnedUserId.current !== lastUserId) {
+      pinnedUserId.current = lastUserId;
+      scrollPinned();
+      // Re-pin after async surface/image layout settles.
+      requestAnimationFrame(() => {
+        recomputeSpacer();
+        scrollPinned();
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, lastUserId]);
+
+  // Recompute the spacer as replies/surfaces grow or the panel resizes (no re-scroll).
+  useEffect(() => {
+    const ol = olRef.current;
+    if (!ol || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => recomputeSpacer());
+    ro.observe(ol);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastUserId]);
 
   if (entries.length === 0) {
     return (
@@ -30,7 +86,9 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
 
   return (
     <ol
+      ref={olRef}
       style={{
+        position: 'relative',
         flex: 1,
         listStyle: 'none',
         margin: 0,
@@ -48,6 +106,7 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
           return (
             <li
               key={entry.id}
+              data-entry-id={entry.id}
               style={{
                 background: 'transparent',
                 color: 'var(--text-faint, #888)',
@@ -60,7 +119,7 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
                 animation: 'glass-rise 0.3s ease both',
               }}
             >
-              {entry.text}
+              {entry.pending ? <PendingIndicator text={entry.text ?? 'Working'} /> : entry.text}
             </li>
           );
         }
@@ -120,6 +179,7 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
         return (
           <li
             key={entry.id}
+            data-entry-id={entry.id}
             style={{
               background: isUser
                 ? 'linear-gradient(155deg, rgba(124,131,255,0.34), rgba(91,99,245,0.20))'
@@ -149,7 +209,39 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
           </li>
         );
       })}
+      {/* Trailing spacer so the pinned user message can reach the top edge. */}
+      <li ref={spacerRef} aria-hidden style={{ flex: '0 0 auto', height: 0, listStyle: 'none' }} />
     </ol>
+  );
+}
+
+/** Cheap CSS.escape fallback for entry ids (which are simple slugs, but be safe). */
+function cssEscape(s: string): string {
+  return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&');
+}
+
+const THINKING_FRAMES = ['🤔', '💭', '✨', '🛰️', '🔮'];
+
+/** Animated "working" indicator: a cycling emoji + animated dots. */
+function PendingIndicator({ text }: { text: string }) {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setFrame((f) => f + 1), 430);
+    return () => clearInterval(t);
+  }, []);
+  const dots = '.'.repeat((frame % 3) + 1);
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontStyle: 'italic' }}>
+      <span
+        key={frame}
+        aria-hidden
+        style={{ display: 'inline-block', fontStyle: 'normal', animation: 'glass-rise 0.3s ease' }}
+      >
+        {THINKING_FRAMES[frame % THINKING_FRAMES.length]}
+      </span>
+      <span>{text}</span>
+      <span style={{ width: 14, textAlign: 'left' }}>{dots}</span>
+    </span>
   );
 }
 
