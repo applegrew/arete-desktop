@@ -130,7 +130,9 @@ relative base. So there is **no fixed port** and no conflict between instances /
 - The webview loads via `WebviewUrl::App("index.html")` → vite devUrl in dev, bundled assets
   (`tauri://`) in release. Either way it fetches the backend at the injected loopback origin
   (cross-origin → `CorsLayer::permissive`; loopback is exempt from mixed-content blocking).
-- The vite `/api` proxy in `vite.config.ts` is now unused (frontend uses the absolute base).
+- No vite `/api` proxy (frontend uses the absolute injected base). The Node agent runtime
+  (`packages/agent`) was deleted once ported to Rust; `packages/{core,agui,adapter-primereact}`
+  remain — they're consumed by the React frontend.
 
 ### Build gotcha: pin `time` to 0.3.47
 

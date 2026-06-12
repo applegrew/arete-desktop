@@ -353,7 +353,7 @@ Agent runtime (v1: in-repo `packages/agent`; FUTURE: standalone `arete-agent` se
 | Phase 3 — Standalone agent + advanced | Upcoming |
 
 - **Phase 0 — PoC** (done): AG-UI ingest adapter in core (`@arete-desktop/agui` → `AgUiDecoder`); Vercel AI SDK backend (`@arete-desktop/agent` → `runAgentTurn`, `createAgentRouter`); one MCP server (in-memory `get_ticket_stats` via `@modelcontextprotocol/sdk`); one `SKILL.md` loaded into system prompt. Full loop proven: agent mutates a surface → visual diff → approve/reject.
-- **Phase 1 — Chat product** (in progress): `arete-chat` flagship app (`apps/chat`) with chat-first UX, dynamic page creation via agent, SQLite persistence (`better-sqlite3`), the full arete-desktop core lifecycle, and a **settings UI** (`/api/settings` + `SettingsPanel`) — model + Ollama URL, MCP server add/remove/toggle, and gate-diffs, all persisted to SQLite and applied live (the agent router reads settings per turn via `resolveOptions`; no restart). **Deferred:** multi-conversation, auth/multi-user.
+- **Phase 1 — Chat product** (in progress): `arete-chat` flagship app (`apps/chat`) with chat-first UX, dynamic page creation via agent, SQLite persistence (`better-sqlite3`), the full arete-desktop core lifecycle, and a **settings UI** (`/api/settings` + `SettingsPanel`) — model + Ollama URL, MCP server add/remove/toggle, and gate-diffs, all persisted to SQLite and applied live (the agent router reads settings per turn via `resolveOptions`; no restart). **Deferred:** multi-conversation.
 - **Phase 2 — MCP + Skills as features** (MCP done; Skills upcoming):
   - MCP server connection management — **done**: config-driven external servers, live add/remove/toggle (Phase 1 settings UI), plus per-server connection status/health (`GET /api/agui/mcp-status`: connected/failed + discovered tools + error) and manual reconnect (`POST /api/agui/mcp-reconnect`), surfaced in `SettingsPanel`. Remaining: OAuth flows for remote servers.
   - Render MCP Apps / MCP-UI resources inside arete surfaces — **done**: MCP tool results carrying `resource`/`resource_link` (inline `text/html`, `ui://`, or `text/uri-list`) are captured per turn and rendered as framework-synthesized `Embed` surfaces (sandboxed iframe, no `allow-same-origin`) in the chat scroll. Remaining: bidirectional MCP-UI `postMessage` (tool calls from inside the iframe).
@@ -374,7 +374,6 @@ Agent runtime (v1: in-repo `packages/agent`; FUTURE: standalone `arete-agent` se
 ### Phase 1 product gaps (deferred)
 
 - **Multi-conversation** — multiple chats; `threadId` field exists in AG-UI events but `ChatStore` is single-flat-list.
-- **Auth / multi-user** — single-user local today; no RBAC enforcement.
 - **Agent `deletePage`** — user-driven delete works; agent-invoked delete page op deferred.
 - **Persist pending (un-approved) diffs across reload** — shadow surface state is ephemeral.
 - **Auto-title pages/conversations** from the first prompt.
