@@ -15,10 +15,14 @@ pub fn envelope_schema() -> Value {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "kind": { "type": "string", "enum": ["a2ui", "pageOp"] },
+                        "kind": { "type": "string", "enum": ["a2ui", "pageOp", "widgetScript"] },
                         "targetSurfaceId": { "type": "string" },
                         "messages": { "type": "array", "items": {} },
-                        "op": page_op_schema()
+                        "op": page_op_schema(),
+                        // widgetScript: a JS handler attached to a surface for an action event.
+                        "event": { "type": "string" },
+                        "runtime": { "type": "string", "enum": ["server", "client"] },
+                        "code": { "type": "string" }
                     },
                     "required": ["kind"],
                     "additionalProperties": false

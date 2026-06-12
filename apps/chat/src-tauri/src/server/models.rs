@@ -38,6 +38,9 @@ pub struct ApiSurface {
     pub data_model: Value,
     #[serde(default)]
     pub updated_at: i64,
+    /// Agent-authored widget action handlers: `{ [event]: { runtime, code } }`.
+    #[serde(default = "empty_object")]
+    pub handlers: Value,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

@@ -28,11 +28,18 @@ export interface ApiPage {
   updatedAt: number;
 }
 
+export interface WidgetHandler {
+  runtime: 'server' | 'client';
+  code: string;
+}
+
 export interface ApiSurface {
   surfaceId: string;
   components: unknown[];
   dataModel: Record<string, unknown>;
   updatedAt: number;
+  /** Agent-authored action handlers keyed by event name. */
+  handlers?: Record<string, WidgetHandler>;
 }
 
 export interface ApiChatEntry {

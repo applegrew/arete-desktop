@@ -83,6 +83,21 @@ pub async fn run_agent_turn(
 
     match run_with_correction(ollama, convo, ctx).await {
         Ok(mut outcome) => {
+            // Compile-check emitted widget handlers; drop any that don't parse so a
+            // malformed local-model script never gets persisted/attached.
+            let mut kept = Vec::with_capacity(outcome.validated.len());
+            for em in outcome.validated.into_iter() {
+                if em.get("kind").and_then(|k| k.as_str()) == Some("widgetScript") {
+                    let code = em.get("code").and_then(|c| c.as_str()).unwrap_or("");
+                    if let Err(e) = super::widget::compile_check(code).await {
+                        log_llm(json!({ "phase": "widget.compile_error", "event": em.get("event"), "error": e }));
+                        continue;
+                    }
+                }
+                kept.push(em);
+            }
+            outcome.validated = kept;
+
             // Render captured MCP-UI resources as their own surfaces (framework-driven).
             for r in &ui_resources {
                 outcome.validated.push(build_embed_emission(r));
@@ -286,15 +301,15 @@ fn env_str(envelope: &Value, key: &str) -> Option<String> {
         .map(String::from)
 }
 
-struct ProcessResult {
-    validated: Vec<Value>,
-    issues: Vec<String>,
-    noops: Vec<String>,
+pub(crate) struct ProcessResult {
+    pub validated: Vec<Value>,
+    pub issues: Vec<String>,
+    pub noops: Vec<String>,
 }
 
 /// Validate + normalize raw emissions: mint/inject surfaceIds, check the component
 /// graph, detect no-ops, resolve pageOp placeholders. Port of `processEmissions`.
-fn process_emissions(emissions: &[Value], ctx: &Value) -> ProcessResult {
+pub(crate) fn process_emissions(emissions: &[Value], ctx: &Value) -> ProcessResult {
     let mut validated: Vec<Value> = Vec::new();
     let mut issues: Vec<String> = Vec::new();
     let mut noops: Vec<String> = Vec::new();
@@ -360,6 +375,35 @@ fn process_emissions(emissions: &[Value], ctx: &Value) -> ProcessResult {
             }
             let op = resolve_placeholders(&raw_op, ctx, last_surface_id.as_deref());
             validated.push(json!({ "kind": "pageOp", "op": op }));
+        } else if kind == "widgetScript" {
+            // A JS action handler attached to a surface. Resolve the target like a2ui.
+            let declared = em.get("targetSurfaceId").and_then(|t| t.as_str()).unwrap_or("");
+            let is_placeholder = declared.is_empty() || declared == "<PLACEHOLDER>";
+            let sid = if is_placeholder {
+                match &last_surface_id {
+                    Some(s) => s.clone(),
+                    None => {
+                        issues.push("widgetScript has no target surface — set targetSurfaceId to the surface's id, or attach it in the same turn that creates the surface.".to_string());
+                        continue;
+                    }
+                }
+            } else {
+                declared.to_string()
+            };
+            let event = em.get("event").and_then(|e| e.as_str()).unwrap_or("");
+            let code = em.get("code").and_then(|c| c.as_str()).unwrap_or("");
+            let runtime = match em.get("runtime").and_then(|r| r.as_str()) {
+                Some("client") => "client",
+                _ => "server",
+            };
+            if event.is_empty() || code.is_empty() {
+                issues.push(format!("widgetScript needs non-empty \"event\" and \"code\". Got: {em}."));
+                continue;
+            }
+            validated.push(json!({
+                "kind": "widgetScript", "targetSurfaceId": sid,
+                "event": event, "runtime": runtime, "code": code,
+            }));
         }
     }
 

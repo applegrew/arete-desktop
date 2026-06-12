@@ -36,6 +36,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/health", get(health))
         // Agent loop: Ollama-backed turn streamed as AG-UI SSE, MCP tools, skills.
         .route("/api/agui", post(agent::run_turn))
+        .route("/api/widget-action", post(agent::run_widget_action))
         .route("/api/agui/health", get(agent::health))
         .route("/api/agui/mcp-status", get(agent::mcp_status))
         .route("/api/agui/mcp-reconnect", post(agent::mcp_reconnect))

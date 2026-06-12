@@ -1,26 +1,22 @@
 import { AgUiDecoder, type AgUiHandlers } from '@arete-desktop/agui';
 import type { AgentMessage } from '@arete-desktop/core';
 
-/**
- * Thin AG-UI client: POST the turn to the agent's `/api/agui` endpoint, read the
- * SSE event stream, and feed each event into an `AgUiDecoder`. The transport is
- * consumer-owned (arete-desktop ships no transport); the decoder hands normalized
- * results to `handlers`, which route them through the Diff Engine / harness.
- */
-export async function streamAgent(
-  prompt: string,
-  messages: AgentMessage[],
-  context: Record<string, unknown>,
+function apiOrigin(): string {
+  return (typeof window !== 'undefined' && (window as { __ARETE_API_BASE__?: string }).__ARETE_API_BASE__) || '';
+}
+
+/** POST `body` to `path`, read the AG-UI SSE stream, feed each event to `handlers`. */
+async function streamSse(
+  path: string,
+  body: unknown,
   handlers: AgUiHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
   const decoder = new AgUiDecoder(handlers);
-  const apiOrigin =
-    (typeof window !== 'undefined' && (window as { __ARETE_API_BASE__?: string }).__ARETE_API_BASE__) || '';
-  const res = await fetch(`${apiOrigin}/api/agui`, {
+  const res = await fetch(`${apiOrigin()}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, messages, context }),
+    body: JSON.stringify(body),
     signal,
   });
   if (!res.ok || !res.body) {
@@ -53,4 +49,30 @@ export async function streamAgent(
       }
     }
   }
+}
+
+/**
+ * Thin AG-UI client: POST the turn to the agent's `/api/agui` endpoint and stream
+ * the SSE result into the decoder. Transport is consumer-owned.
+ */
+export function streamAgent(
+  prompt: string,
+  messages: AgentMessage[],
+  context: Record<string, unknown>,
+  handlers: AgUiHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamSse('/api/agui', { prompt, messages, context }, handlers, signal);
+}
+
+/**
+ * Run a surface's agent-authored handler script server-side (NO LLM) and stream
+ * the resulting surface emissions back through the same AG-UI decoder pipeline.
+ */
+export function streamWidgetAction(
+  body: { surfaceId: string; event: string; ctx: unknown; code: string; surface: unknown },
+  handlers: AgUiHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamSse('/api/widget-action', body, handlers, signal);
 }

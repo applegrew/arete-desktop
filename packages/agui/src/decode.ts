@@ -66,6 +66,14 @@ function asEmission(value: unknown): Emission | null {
   if (v.kind === 'pageOp' && v.op && typeof v.op === 'object') {
     return v as unknown as Emission;
   }
+  if (
+    v.kind === 'widgetScript' &&
+    typeof v.targetSurfaceId === 'string' &&
+    typeof v.event === 'string' &&
+    typeof v.code === 'string'
+  ) {
+    return v as unknown as Emission;
+  }
   return null;
 }
 

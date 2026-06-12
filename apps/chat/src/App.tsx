@@ -26,7 +26,9 @@ import {
   type ChatRole,
 } from '@arete-desktop/core';
 import { primeReactCatalog, componentAgentHints } from '@arete-desktop/adapter-primereact';
-import { streamAgent } from './agui-client';
+import { streamAgent, streamWidgetAction } from './agui-client';
+import { WidgetManager } from './widget-manager';
+import type { WidgetHandler } from './persistence';
 import {
   loadPages,
   createPage,
@@ -121,9 +123,13 @@ export function App() {
   const runUserActionRef = useRef<(sid: string, item: { action: UserAction; repeatCount: number }) => void>(
     () => {},
   );
+  // Dispatches one action: a Widget Manager handler if registered, else the LLM.
+  // Assigned later (after widgetManager + runWidgetAction exist).
+  const dispatchActionRef = useRef<(item: { action: UserAction; repeatCount: number }) => Promise<void>>(
+    async () => {},
+  );
   runUserActionRef.current = (sid, item) => {
-    const synth = buildActionSynth(item.action, item.repeatCount);
-    Promise.resolve(handlePromptRef.current(synth, true)).finally(() => {
+    Promise.resolve(dispatchActionRef.current(item)).finally(() => {
       const st = actionQueuesRef.current.get(sid);
       if (!st) return;
       const next = st.queue.shift();
@@ -157,6 +163,9 @@ export function App() {
     // Cancel means stop: also drop any queued (not-yet-dispatched) user actions.
     actionQueuesRef.current.clear();
   }, []);
+
+  // Agent-authored widget action handlers (server-run scripts that replace LLM turns).
+  const widgetManager = useMemo(() => new WidgetManager(), []);
 
   const [shellState, setShellState] = useState<ShellState>({ activeTabId: 'chat', chatDockState: 'dock' });
 
@@ -379,6 +388,7 @@ export function App() {
         try {
           liveProcessor.processMessages(msgs as never);
           surfaceContentsRef.current[s.surfaceId] = s.components;
+          widgetManager.loadSurface(s.surfaceId, s.handlers);
         } catch {
           /* skip malformed persisted surface */
         }
@@ -458,7 +468,13 @@ export function App() {
         } catch {
           /* ignore */
         }
-        return { surfaceId, components: components as unknown[], dataModel, updatedAt: Date.now() };
+        return {
+          surfaceId,
+          components: components as unknown[],
+          dataModel,
+          updatedAt: Date.now(),
+          handlers: widgetManager.forSurface(surfaceId),
+        };
       });
       saveSurfaces(recs).catch(() => {});
     }, 1500);
@@ -573,6 +589,17 @@ export function App() {
                 // User-action page ops auto-apply (no approval gate), matching content edits.
                 harness.apply(op as never, { autoApprove: fromUserAction });
               }
+            } else if (emission.kind === 'widgetScript') {
+              // The agent attached an action handler to a surface — register it so
+              // future occurrences of that event are handled without the LLM.
+              widgetManager.set(emission.targetSurfaceId, emission.event, {
+                runtime: emission.runtime,
+                code: emission.code,
+              });
+              chatStore.push({
+                role: 'system',
+                text: `Learned a handler for "${emission.event}" — future clicks run instantly.`,
+              });
             }
           },
           onRunError: ({ message }) => {
@@ -606,12 +633,73 @@ export function App() {
       updatePageLocal,
       deletePageLocal,
       shellState.activeTabId,
+      widgetManager,
     ],
   );
 
   useEffect(() => {
     handlePromptRef.current = handlePrompt;
   }, [handlePrompt]);
+
+  // Run a surface's server handler script (no LLM) and apply its surface edits.
+  // On script failure, fall back to a normal LLM turn so the journey still works.
+  const runWidgetAction = useCallback(
+    async (action: UserAction, handler: WidgetHandler) => {
+      const surfaceId = action.surfaceId;
+      if (!surfaceId) return;
+      const components = surfaceContentsRef.current[surfaceId] ?? [];
+      let dataModel: Record<string, unknown> = {};
+      try {
+        const dm = liveProcessor.model.getSurface(surfaceId)?.dataModel?.get('/');
+        if (dm && typeof dm === 'object') dataModel = dm as Record<string, unknown>;
+      } catch {
+        /* ignore */
+      }
+
+      const controller = new AbortController();
+      abortControllersRef.current.add(controller);
+      setBusyCount((c) => c + 1);
+      let errored = false;
+      try {
+        await streamWidgetAction(
+          { surfaceId, event: action.name, ctx: action.context ?? {}, code: handler.code, surface: { components, dataModel } },
+          {
+            onEmission: (emission) => {
+              if (emission.kind === 'a2ui') {
+                const messages = emission.messages as unknown[];
+                captureSurfaceContents(messages);
+                router.route(messages as never, { bypassGate: true });
+              }
+            },
+            onRunError: ({ message }) => {
+              errored = true;
+              chatStore.push({ role: 'system', text: `Widget action failed: ${message}` });
+            },
+          },
+          controller.signal,
+        );
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          errored = true;
+          chatStore.push({ role: 'system', text: `Widget action failed: ${(err as Error).message}` });
+        }
+      } finally {
+        abortControllersRef.current.delete(controller);
+        setBusyCount((c) => c - 1);
+      }
+      if (errored && !controller.signal.aborted) {
+        await handlePromptRef.current(buildActionSynth(action, 1), true);
+      }
+    },
+    [router, chatStore, captureSurfaceContents, liveProcessor],
+  );
+
+  // Decide per action: a registered server handler (Widget Manager) or the LLM.
+  dispatchActionRef.current = (item) => {
+    const h = widgetManager.handlerFor(item.action.surfaceId, item.action.name);
+    if (h && h.runtime === 'server') return runWidgetAction(item.action, h);
+    return Promise.resolve(handlePromptRef.current(buildActionSynth(item.action, item.repeatCount), true));
+  };
 
   const renderChatSurface = useCallback(
     (surfaceId: string) => {

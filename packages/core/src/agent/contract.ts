@@ -23,8 +23,18 @@ export interface PageOpEmission {
   op: PageOp;
 }
 
-/** One unit of agent output: either A2UI content or a page op. */
-export type Emission = A2uiEmission | PageOpEmission;
+/** Attach a sandboxed JS handler to a surface for a user-action event, so future
+ *  occurrences are handled by the Widget Manager (no LLM round-trip). */
+export interface WidgetScriptEmission {
+  kind: 'widgetScript';
+  targetSurfaceId: string;
+  event: string;
+  runtime: 'server' | 'client';
+  code: string;
+}
+
+/** One unit of agent output: A2UI content, a page op, or a widget handler script. */
+export type Emission = A2uiEmission | PageOpEmission | WidgetScriptEmission;
 
 /**
  * The full response envelope an agent turn returns.
