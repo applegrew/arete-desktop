@@ -159,6 +159,24 @@ Design rules:
 - **All structural ops flow through the Diff Engine by default** — "change layout to 3×3" previews the new layout before committing. Consumers can mark specific ops as `autoApprove` per-op or per-tab.
 - All ops emit through the same `onProposed` / `onApprove` / `onReject` stream as content diffs, so audit and undo are unified across content and structure.
 
+### Surface State History (navigation is NOT special-cased)
+
+Do NOT implement "Back" as a bespoke primitive (no `pushHistory` flag, no
+`history.back()` host function). Back is just one case of "restore a prior
+surface state."
+
+- **Capture generically.** Every surface render is appended to a per-surface,
+  globally-ordered **timeline** (snapshot = components + dataModel + trigger +
+  seq + ts), persisted like the chat transcript.
+- **Expose to the LLM via tools.** The agent studies the timeline through tools
+  (e.g. `getSurfaceHistory`) and decides what to render next. 
+- **Expose to handlers generically.** Widget Manager handlers read the same
+  timeline (`surface.history`) and restore a prior snapshot by index — or render
+  something fresh. It is the LLM's choice what JS to write (restore vs rebuild).
+
+There is no dedicated back/forward API — all navigation is "pick a state from
+the generic timeline (or build a new one)."
+
 ### Lifecycle hooks
 
 Exposed at the Shell level, threaded through every component and the harness:
