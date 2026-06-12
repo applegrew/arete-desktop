@@ -1,6 +1,11 @@
 import type { LayoutDescriptor } from '@arete-desktop/core';
 
-const BASE = '/api';
+// The desktop shell binds the backend to a free port at runtime and injects the
+// origin (e.g. "http://127.0.0.1:53124") as window.__ARETE_API_BASE__ before load.
+// Falls back to a same-origin relative base (e.g. plain web/dev-server use).
+const API_ORIGIN =
+  (typeof window !== 'undefined' && (window as { __ARETE_API_BASE__?: string }).__ARETE_API_BASE__) || '';
+const BASE = `${API_ORIGIN}/api`;
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 async function jfetch<T>(url: string, init?: RequestInit): Promise<T> {

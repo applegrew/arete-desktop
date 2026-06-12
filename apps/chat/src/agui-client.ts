@@ -14,7 +14,9 @@ export async function streamAgent(
   handlers: AgUiHandlers,
 ): Promise<void> {
   const decoder = new AgUiDecoder(handlers);
-  const res = await fetch('/api/agui', {
+  const apiOrigin =
+    (typeof window !== 'undefined' && (window as { __ARETE_API_BASE__?: string }).__ARETE_API_BASE__) || '';
+  const res = await fetch(`${apiOrigin}/api/agui`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, messages, context }),

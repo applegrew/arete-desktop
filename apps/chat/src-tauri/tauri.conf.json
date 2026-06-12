@@ -10,15 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Arete Chat",
-        "width": 1400,
-        "height": 900,
-        "resizable": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

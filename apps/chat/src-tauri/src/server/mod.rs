@@ -19,12 +19,11 @@ use tower_http::cors::CorsLayer;
 
 use state::AppState;
 
-/// Build the axum app mirroring the legacy Express `/api` contract. In release
-/// builds it also serves the embedded SPA (same-origin), so the bundled app's
-/// relative `/api` fetches work without the dev vite proxy.
+/// Build the axum app mirroring the legacy Express `/api` contract. The frontend
+/// (vite in dev, the bundled asset protocol in release) calls these endpoints at
+/// the injected absolute origin (`window.__ARETE_API_BASE__`), so CORS is permissive.
 pub fn build_router(state: AppState) -> Router {
-    #[allow(unused_mut)]
-    let mut router = Router::new()
+    Router::new()
         .route("/api/pages", get(routes::pages::list).post(routes::pages::create))
         .route(
             "/api/pages/:id",
@@ -39,65 +38,19 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/agui", post(agent::run_turn))
         .route("/api/agui/health", get(agent::health))
         .route("/api/agui/mcp-status", get(agent::mcp_status))
-        .route("/api/agui/mcp-reconnect", post(agent::mcp_reconnect));
-
-    // Release: serve the embedded SPA for any non-/api path (SPA fallback).
-    // Dev keeps vite+HMR at :5173 (no fallback mounted).
-    #[cfg(not(debug_assertions))]
-    {
-        router = router.fallback(spa::handler);
-    }
-
-    router
+        .route("/api/agui/mcp-reconnect", post(agent::mcp_reconnect))
         .layer(DefaultBodyLimit::max(4 * 1024 * 1024))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
 
-/// Embedded built frontend (release only). `../dist` is produced by the
-/// `beforeBuildCommand` (vite build) before the Rust release compile.
-#[cfg(not(debug_assertions))]
-mod spa {
-    use axum::http::{header, StatusCode, Uri};
-    use axum::response::{IntoResponse, Response};
-    use rust_embed::RustEmbed;
-
-    #[derive(RustEmbed)]
-    #[folder = "../dist"]
-    struct Assets;
-
-    pub async fn handler(uri: Uri) -> Response {
-        let path = uri.path().trim_start_matches('/');
-        let path = if path.is_empty() { "index.html" } else { path };
-        if let Some(content) = Assets::get(path) {
-            let mime = mime_guess::from_path(path).first_or_octet_stream();
-            return ([(header::CONTENT_TYPE, mime.as_ref())], content.data.into_owned()).into_response();
-        }
-        // Unknown path → index.html (client-side routing).
-        match Assets::get("index.html") {
-            Some(c) => ([(header::CONTENT_TYPE, "text/html")], c.data.into_owned()).into_response(),
-            None => (StatusCode::NOT_FOUND, "not found").into_response(),
-        }
-    }
-}
-
-/// Bind and serve (loopback only). Signals `ready` once the listener is bound —
-/// or on bind failure (another instance may already serve `addr`), so the release
-/// window can still navigate to it.
-pub async fn run(addr: &str, state: AppState, ready: std::sync::mpsc::Sender<()>) -> Result<()> {
-    match tokio::net::TcpListener::bind(addr).await {
-        Ok(listener) => {
-            eprintln!("[arete-chat] axum listening on http://{addr}");
-            let _ = ready.send(());
-            axum::serve(listener, build_router(state)).await?;
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("[arete-chat] failed to bind {addr}: {e} (another instance already running?)");
-            let _ = ready.send(());
-            Err(e.into())
-        }
-    }
+/// Serve on an already-bound listener (the caller binds a free port synchronously
+/// so it can inject the resulting origin into the webview before it loads).
+pub async fn serve(listener: std::net::TcpListener, state: AppState) -> Result<()> {
+    listener.set_nonblocking(true)?;
+    let listener = tokio::net::TcpListener::from_std(listener)?;
+    axum::serve(listener, build_router(state)).await?;
+    Ok(())
 }
 
 async fn health() -> axum::Json<Value> {

@@ -1,6 +1,6 @@
 mod server;
 
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// Tauri entry point. Resolves the per-OS app-data dir, opens the SQLite DB, and
 /// spawns the embedded axum server on 127.0.0.1:8787 before the window loads.
@@ -20,33 +20,34 @@ pub fn run() {
 
             let state = server::state::AppState::new(&db_path).expect("failed to init database");
 
-            // axum runs on its own tokio runtime in a background thread; loopback only.
-            let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+            // Bind a free OS-assigned port synchronously so we know the backend origin
+            // BEFORE the window loads — then inject it for the frontend. Avoids any
+            // fixed-port conflict (multiple instances, a stray dev server, etc.).
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a port");
+            let port = listener.local_addr().expect("failed to read bound port").port();
+            let api_base = format!("http://127.0.0.1:{port}");
+            eprintln!("[arete-chat] backend on {api_base}");
+
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
                 rt.block_on(async move {
-                    if let Err(e) = server::run("127.0.0.1:8787", state, ready_tx).await {
+                    if let Err(e) = server::serve(listener, state).await {
                         eprintln!("[arete-chat] server error: {e}");
                     }
                 });
             });
 
-            // Release: the webview is served from the bundle (tauri://) where relative
-            // /api can't reach axum. Once the server is up, navigate to the same-origin
-            // server so /api works. Dev keeps the vite devUrl (+ proxy).
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let _ = ready_rx.recv();
-                #[cfg(not(debug_assertions))]
-                if let Some(win) = handle.get_webview_window("main") {
-                    if let Ok(url) = "http://127.0.0.1:8787/".parse() {
-                        let _ = win.navigate(url);
-                    }
-                    let _ = win.show();
-                }
-                #[cfg(debug_assertions)]
-                let _ = &handle;
-            });
+            // Create the window, injecting the API origin before any page script runs.
+            // WebviewUrl::App resolves to the vite devUrl in dev and the bundled assets
+            // in release; both read window.__ARETE_API_BASE__ for absolute /api calls.
+            let init_script = format!("window.__ARETE_API_BASE__ = \"{api_base}\";");
+            WebviewWindowBuilder::new(app.handle(), "main", WebviewUrl::App("index.html".into()))
+                .title("Arete Chat")
+                .inner_size(1400.0, 900.0)
+                .resizable(true)
+                .initialization_script(&init_script)
+                .build()
+                .expect("failed to create main window");
 
             Ok(())
         })

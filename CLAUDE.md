@@ -116,14 +116,18 @@ emission validation, MCP pre-step), `prompt.rs`/`prompt_template.txt`, `sse.rs` 
 server entries connect-fail with a clear status message — wiring the rmcp HTTP transports is
 the remaining MCP work. Servers come from settings `mcpServers` (the single source; no `mcp.json`).
 
-### Packaging: dev vs release origin
+### Backend port + API origin (dev and release identical)
 
-- **Dev** (`pnpm tauri dev`, debug): webview loads vite at `:5173`; vite proxies `/api` → axum `:8787`.
-- **Release** (`pnpm tauri build`): the frontend is embedded (`rust-embed` over `../dist`, gated
-  `#[cfg(not(debug_assertions))]`) and served by axum, and the window navigates to
-  `http://127.0.0.1:8787` so the SPA + `/api` share one origin. `tauri build --debug` does NOT get
-  this (it's a debug build) — use a full release `tauri build` to test the bundle. Single-instance:
-  the app assumes it owns `:8787`.
+`lib.rs` binds `127.0.0.1:0` (a free OS-assigned port) **synchronously** at startup, then creates
+the window in code (`WebviewWindowBuilder`, not `tauri.conf.json`) with an `initialization_script`
+that sets `window.__ARETE_API_BASE__ = "http://127.0.0.1:<port>"`. The frontend reads that global
+for absolute `/api` calls (`apps/chat/src/{persistence.ts,agui-client.ts}`), falling back to a
+relative base. So there is **no fixed port** and no conflict between instances / a stray dev server.
+
+- The webview loads via `WebviewUrl::App("index.html")` → vite devUrl in dev, bundled assets
+  (`tauri://`) in release. Either way it fetches the backend at the injected loopback origin
+  (cross-origin → `CorsLayer::permissive`; loopback is exempt from mixed-content blocking).
+- The vite `/api` proxy in `vite.config.ts` is now unused (frontend uses the absolute base).
 
 ### Build gotcha: pin `time` to 0.3.47
 
