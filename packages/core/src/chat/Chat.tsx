@@ -128,7 +128,7 @@ export function Chat({ store, mode, onModeChange, renderSurface }: ChatProps) {
         )}
       </header>
       <ChatSurfaceList store={store} renderSurface={renderSurface} />
-      <ChatInput onSubmit={handleSubmit} />
+      <ChatInput onSubmit={handleSubmit} busy={hooks.busy} onCancel={hooks.onCancelPrompt} />
     </section>
   );
 }

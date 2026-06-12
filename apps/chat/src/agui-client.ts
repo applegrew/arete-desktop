@@ -12,6 +12,7 @@ export async function streamAgent(
   messages: AgentMessage[],
   context: Record<string, unknown>,
   handlers: AgUiHandlers,
+  signal?: AbortSignal,
 ): Promise<void> {
   const decoder = new AgUiDecoder(handlers);
   const apiOrigin =
@@ -20,6 +21,7 @@ export async function streamAgent(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, messages, context }),
+    signal,
   });
   if (!res.ok || !res.body) {
     throw new Error(`Agent stream failed: ${res.status} ${res.statusText}`);

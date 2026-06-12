@@ -148,6 +148,16 @@ export function App() {
     }
   }, []);
 
+  // Busy = at least one agent turn in-flight; toggles the chat Send button to Cancel.
+  const [busyCount, setBusyCount] = useState(0);
+  const abortControllersRef = useRef<Set<AbortController>>(new Set());
+  const cancelPrompt = useCallback(() => {
+    for (const c of abortControllersRef.current) c.abort();
+    abortControllersRef.current.clear();
+    // Cancel means stop: also drop any queued (not-yet-dispatched) user actions.
+    actionQueuesRef.current.clear();
+  }, []);
+
   const [shellState, setShellState] = useState<ShellState>({ activeTabId: 'chat', chatDockState: 'dock' });
 
   // Transient halo target — set when locating a surface moved to a page; auto-clears.
@@ -497,6 +507,11 @@ export function App() {
       const priorMessages =
         last && last.role === 'user' && last.content === text ? allMessages.slice(0, -1) : allMessages;
 
+      // Track the turn so the chat input can show Cancel and abort the fetch.
+      const controller = new AbortController();
+      abortControllersRef.current.add(controller);
+      setBusyCount((c) => c + 1);
+
       const askingEntry = chatStore.push({ role: 'system', text: 'Asking the agent', pending: true });
       let cleared = false;
       const clearAsking = () => {
@@ -564,11 +579,18 @@ export function App() {
             clearAsking();
             chatStore.push({ role: 'system', text: `Agent error: ${message}` });
           },
-        });
+        }, controller.signal);
         clearAsking();
       } catch (err) {
         clearAsking();
-        chatStore.push({ role: 'system', text: `Agent error: ${(err as Error).message}` });
+        if (controller.signal.aborted) {
+          chatStore.push({ role: 'system', text: 'Cancelled.' });
+        } else {
+          chatStore.push({ role: 'system', text: `Agent error: ${(err as Error).message}` });
+        }
+      } finally {
+        abortControllersRef.current.delete(controller);
+        setBusyCount((c) => c - 1);
       }
     },
     [
@@ -745,7 +767,7 @@ export function App() {
             </button>
           </div>
         }
-        hooks={{ onPrompt: handlePrompt }}
+        hooks={{ onPrompt: handlePrompt, busy: busyCount > 0, onCancelPrompt: cancelPrompt }}
         chatStore={chatStore}
         pendingByTabId={pendingByTabId}
         actionHarness={actionHarness}

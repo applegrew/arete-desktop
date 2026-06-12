@@ -3,14 +3,21 @@ import { useState, type FormEvent } from 'react';
 export interface ChatInputProps {
   onSubmit: (text: string) => void;
   disabled?: boolean;
+  /** Agent turn in-flight: show Cancel, and don't send on Enter (keep the typed text). */
+  busy?: boolean;
+  /** Invoked by the Cancel button while busy. */
+  onCancel?: () => void;
   placeholder?: string;
 }
 
-export function ChatInput({ onSubmit, disabled, placeholder }: ChatInputProps) {
+export function ChatInput({ onSubmit, disabled, busy, onCancel, placeholder }: ChatInputProps) {
   const [value, setValue] = useState('');
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    // While the agent is busy, Enter/submit is a no-op — the message stays in the
+    // input (not sent). Cancel is a plain button, so Enter never triggers it.
+    if (busy) return;
     const trimmed = value.trim();
     if (!trimmed) return;
     onSubmit(trimmed);
@@ -57,32 +64,54 @@ export function ChatInput({ onSubmit, disabled, placeholder }: ChatInputProps) {
           transition: 'border-color 0.18s ease, box-shadow 0.18s ease',
         }}
       />
-      <button
-        type="submit"
-        disabled={disabled}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'translateY(-1px)';
-          e.currentTarget.style.boxShadow = '0 10px 26px -8px rgba(124,131,255,0.8)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'translateY(0)';
-          e.currentTarget.style.boxShadow = '0 6px 18px -8px rgba(124,131,255,0.7)';
-        }}
-        style={{
-          padding: '11px 20px',
-          borderRadius: 999,
-          border: '1px solid rgba(124,131,255,0.5)',
-          background: 'linear-gradient(135deg, var(--accent, #3b82f6), var(--accent-strong, #5b63f5))',
-          color: '#fff',
-          cursor: 'pointer',
-          fontWeight: 600,
-          fontSize: 14,
-          boxShadow: '0 6px 18px -8px rgba(124,131,255,0.7), inset 0 1px 0 rgba(255,255,255,0.3)',
-          transition: 'transform 0.18s ease, box-shadow 0.18s ease',
-        }}
-      >
-        Send
-      </button>
+      {busy ? (
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label="Cancel the in-flight agent turn"
+          style={{
+            padding: '11px 20px',
+            borderRadius: 999,
+            border: '1px solid rgba(239,68,68,0.55)',
+            background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+            color: '#fff',
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: 14,
+            boxShadow: '0 6px 18px -8px rgba(239,68,68,0.7), inset 0 1px 0 rgba(255,255,255,0.3)',
+            transition: 'transform 0.18s ease, box-shadow 0.18s ease',
+          }}
+        >
+          Cancel
+        </button>
+      ) : (
+        <button
+          type="submit"
+          disabled={disabled}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-1px)';
+            e.currentTarget.style.boxShadow = '0 10px 26px -8px rgba(124,131,255,0.8)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = '0 6px 18px -8px rgba(124,131,255,0.7)';
+          }}
+          style={{
+            padding: '11px 20px',
+            borderRadius: 999,
+            border: '1px solid rgba(124,131,255,0.5)',
+            background: 'linear-gradient(135deg, var(--accent, #3b82f6), var(--accent-strong, #5b63f5))',
+            color: '#fff',
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: 14,
+            boxShadow: '0 6px 18px -8px rgba(124,131,255,0.7), inset 0 1px 0 rgba(255,255,255,0.3)',
+            transition: 'transform 0.18s ease, box-shadow 0.18s ease',
+          }}
+        >
+          Send
+        </button>
+      )}
     </form>
   );
 }

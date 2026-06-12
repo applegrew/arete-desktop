@@ -12,6 +12,10 @@ export interface HookContextValue {
   resolveDataPath: ResolveDataPath;
   onUserAction: OnUserAction;
   onPrompt: OnPrompt;
+  /** True while an agent turn is in-flight — the chat input shows Cancel instead of Send. */
+  busy?: boolean;
+  /** Abort the in-flight agent turn(s). Wired to the chat input's Cancel button. */
+  onCancelPrompt?: () => void;
   onPageOp: OnPageOp;
   onProposed: OnProposed;
   onApprove: OnApprove;
