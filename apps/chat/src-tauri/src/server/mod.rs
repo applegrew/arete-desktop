@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod db;
 pub mod models;
 pub mod settings;
@@ -31,10 +32,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/state", get(routes::app_state::get).post(routes::app_state::post))
         .route("/api/settings", get(routes::settings::get).put(routes::settings::put))
         .route("/api/health", get(health))
-        // Agent loop (Phase 2). Stubbed so the frontend's health/MCP fallbacks degrade cleanly.
-        .route("/api/agui/health", get(routes::agui::health))
-        .route("/api/agui/mcp-status", get(routes::agui::mcp_status))
-        .route("/api/agui/mcp-reconnect", post(routes::agui::mcp_reconnect))
+        // Agent loop: Ollama-backed turn streamed as AG-UI SSE. MCP deferred (Phase 3).
+        .route("/api/agui", post(agent::run_turn))
+        .route("/api/agui/health", get(agent::health))
+        .route("/api/agui/mcp-status", get(agent::mcp_status))
+        .route("/api/agui/mcp-reconnect", post(agent::mcp_reconnect))
         .layer(DefaultBodyLimit::max(4 * 1024 * 1024))
         .layer(CorsLayer::permissive())
         .with_state(state)

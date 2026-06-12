@@ -18,6 +18,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync"] }
+tokio-stream = "0.1"
+bytes = "1"
 tower-http = { version = "0.6", features = ["cors", "limit", "fs"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
