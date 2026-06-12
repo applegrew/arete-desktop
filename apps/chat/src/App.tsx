@@ -15,6 +15,7 @@ import {
   buildAgentContext,
   deriveSurfaceLabel,
   describeContentChange,
+  deepEqual,
   uid,
   type ShellTab,
   type ShellState,
@@ -52,6 +53,25 @@ const DEFAULT_LAYOUT: LayoutDescriptor = {
   regions: [{ id: 'top-left' }, { id: 'top-right' }, { id: 'bottom-left' }, { id: 'bottom-right' }],
 };
 
+/** The synthesized `[USER ACTION]` prompt sent to the agent for a dispatched action. */
+function buildActionSynth(action: UserAction, repeatCount: number): string {
+  const contextStr = JSON.stringify(action.context);
+  const surfaceClause = action.surfaceId ? ` on surface ${action.surfaceId}` : '';
+  const componentClause = action.sourceComponentId ? ` (component ${action.sourceComponentId})` : '';
+  let synth = `[USER ACTION] event "${action.name}"${surfaceClause}${componentClause}; context: ${contextStr}`;
+  if (repeatCount > 1) {
+    synth +=
+      ` [repeated ${repeatCount}× in quick succession while the previous action on this surface was still ` +
+      `processing — decide whether this is a single retry or ${repeatCount} intended repeats]`;
+  }
+  return synth;
+}
+
+/** Two actions coalesce only if they're the same event from the same component with the same context. */
+function sameUserAction(a: UserAction, b: UserAction): boolean {
+  return a.name === b.name && a.sourceComponentId === b.sourceComponentId && deepEqual(a.context, b.context);
+}
+
 export function App() {
   const currentCatalog = useMemo(() => withComponentIds(primeReactCatalog), []);
   const catalogId = useMemo(() => (currentCatalog as { id: string }).id, [currentCatalog]);
@@ -88,7 +108,46 @@ export function App() {
   const pinnedSurfaceIdsRef = useRef<Set<string>>(new Set());
   const surfaceContentsRef = useRef<Record<string, unknown[]>>({});
   const recentSurfaceIdsRef = useRef<string[]>([]);
-  const handlePromptRef = useRef<(text: string, fromUserAction?: boolean) => void>(() => {});
+  const handlePromptRef = useRef<(text: string, fromUserAction?: boolean) => void | Promise<void>>(() => {});
+
+  // Per-surface user-action serialization. While a surface's action turn is
+  // in-flight, further actions from THAT surface queue (coalescing consecutive
+  // identical ones into a repeat count); other surfaces stay concurrent. This
+  // prevents racing turns and lets the agent disambiguate retry vs. intentional
+  // repeats. Typed prompts (onPrompt) are NOT serialized.
+  const actionQueuesRef = useRef<
+    Map<string, { inFlight: boolean; queue: Array<{ action: UserAction; repeatCount: number }> }>
+  >(new Map());
+  const runUserActionRef = useRef<(sid: string, item: { action: UserAction; repeatCount: number }) => void>(
+    () => {},
+  );
+  runUserActionRef.current = (sid, item) => {
+    const synth = buildActionSynth(item.action, item.repeatCount);
+    Promise.resolve(handlePromptRef.current(synth, true)).finally(() => {
+      const st = actionQueuesRef.current.get(sid);
+      if (!st) return;
+      const next = st.queue.shift();
+      if (next) runUserActionRef.current(sid, next);
+      else st.inFlight = false;
+    });
+  };
+  const enqueueUserAction = useCallback((action: UserAction) => {
+    const sid = action.surfaceId ?? '__global__';
+    let st = actionQueuesRef.current.get(sid);
+    if (!st) {
+      st = { inFlight: false, queue: [] };
+      actionQueuesRef.current.set(sid, st);
+    }
+    if (!st.inFlight) {
+      st.inFlight = true;
+      runUserActionRef.current(sid, { action, repeatCount: 1 });
+    } else {
+      const tail = st.queue[st.queue.length - 1];
+      if (tail && sameUserAction(tail.action, action)) tail.repeatCount += 1;
+      else st.queue.push({ action, repeatCount: 1 });
+    }
+  }, []);
+
   const [shellState, setShellState] = useState<ShellState>({ activeTabId: 'chat', chatDockState: 'dock' });
 
   // Transient halo target — set when locating a surface moved to a page; auto-clears.
@@ -269,22 +328,19 @@ export function App() {
       onBeforeApply: (messages: unknown[]) => messages as never,
       onPageOp: (op: unknown) => op as never,
       onUserAction: (action: UserAction) => {
-        const contextStr = JSON.stringify(action.context);
-        const surfaceClause = action.surfaceId ? ` on surface ${action.surfaceId}` : '';
-        const componentClause = action.sourceComponentId ? ` (component ${action.sourceComponentId})` : '';
-        const synth = `[USER ACTION] event "${action.name}"${surfaceClause}${componentClause}; context: ${contextStr}`;
         // Show a compact, PERSISTENT chip (raw synth kept in `text` for agent
         // history/hover). NOTE: no surfaceId — otherwise removeBySurfaceId (fired
         // when the origin surface is pinned) would delete this notification.
+        chatStore.push({ role: 'action', text: buildActionSynth(action, 1), actionLabel: action.name });
+        // Serialize per-surface: dispatch now or queue behind an in-flight turn.
         // fromUserAction=true so resulting surface edits apply un-gated.
-        chatStore.push({ role: 'action', text: synth, actionLabel: action.name });
-        handlePromptRef.current(synth, true);
+        enqueueUserAction(action);
       },
     };
     router.setHooks(sharedHooks);
     harness.setHooks(sharedHooks);
     actionHarness.setHooks(sharedHooks);
-  }, [router, harness, actionHarness, chatStore, diffsGated]);
+  }, [router, harness, actionHarness, chatStore, diffsGated, enqueueUserAction]);
 
   // --- load / restore on mount (once; StrictMode double-invokes effects) ---
   const didLoadRef = useRef(false);
