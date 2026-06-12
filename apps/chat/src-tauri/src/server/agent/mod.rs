@@ -15,8 +15,11 @@ use axum::{
     Json,
 };
 use bytes::Bytes;
+use futures::Stream;
 use serde_json::{json, Value};
 use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -24,6 +27,28 @@ use super::{settings, state::AppState};
 use ollama::Ollama;
 use sse::Sink;
 use turn::run_agent_turn;
+
+/// Aborts the turn task when dropped. The response stream owns one of these, so a
+/// client disconnect (which drops the body stream) cancels the in-flight turn —
+/// dropping the Ollama / MCP request futures (true server-side cancel).
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Wraps the SSE stream, keeping an `AbortOnDrop` alive for the stream's lifetime.
+struct GuardedStream<S> {
+    inner: S,
+    _guard: AbortOnDrop,
+}
+impl<S: Stream + Unpin> Stream for GuardedStream<S> {
+    type Item = S::Item;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<S::Item>> {
+        Pin::new(&mut self.inner).poll_next(cx)
+    }
+}
 
 /// Build an Ollama client from the live persisted settings (model + base URL).
 fn resolve_ollama(st: &AppState) -> Ollama {
@@ -63,7 +88,7 @@ pub async fn run_turn(State(st): State<AppState>, Json(body): Json<Value>) -> Re
 
     let (tx, rx) = mpsc::channel::<Result<Bytes, io::Error>>(64);
 
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         let sink = Sink::new(tx);
         sink.run_started(&thread_id, &run_id).await;
 
@@ -96,11 +121,14 @@ pub async fn run_turn(State(st): State<AppState>, Json(body): Json<Value>) -> Re
         // tx drops here → the response stream ends.
     });
 
+    // The stream owns the task's AbortOnDrop: when the client disconnects, axum
+    // drops the body → drops the guard → aborts the turn (cancelling Ollama/MCP).
+    let stream = GuardedStream { inner: ReceiverStream::new(rx), _guard: AbortOnDrop(task) };
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")
         .header(header::CONNECTION, "keep-alive")
-        .body(Body::from_stream(ReceiverStream::new(rx)))
+        .body(Body::from_stream(stream))
         .unwrap()
 }
