@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAgentRouter, loadMcpConfig, setLlmLogDir } from '@arete-ui/agent';
+import { createAgentRouter, loadMcpConfig, setLlmLogDir } from '@arete-desktop/agent';
 import { pagesRouter } from './routes/pages';
 import { surfacesRouter } from './routes/surfaces';
 import { chatRouter } from './routes/chat';
@@ -31,7 +31,7 @@ app.use('/api/surfaces', surfacesRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/state', stateRouter);
 app.use('/api/settings', createSettingsRouter(seedMcp));
-// Stateless agent loop (AG-UI SSE + /health) from @arete-ui/agent. Model + enabled
+// Stateless agent loop (AG-UI SSE + /health) from @arete-desktop/agent. Model + enabled
 // MCP servers are resolved live from settings on every turn (no restart needed).
 app.use(
   '/api/agui',

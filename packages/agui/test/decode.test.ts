@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventType, type BaseEvent } from '@ag-ui/core';
 import { AgUiDecoder, ARETE_EMISSION_EVENT } from '../src/decode';
-import type { Emission } from '@arete-ui/core';
+import type { Emission } from '@arete-desktop/core';
 
 function ev(obj: Record<string, unknown>): BaseEvent {
   return obj as unknown as BaseEvent;

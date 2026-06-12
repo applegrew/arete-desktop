@@ -1,8 +1,8 @@
 {
-  "name": "@arete-ui/agui",
+  "name": "@arete-desktop/agui",
   "version": "0.0.1",
   "private": true,
-  "description": "AG-UI (Agent-User Interaction) event decoder for arete-ui — maps an AG-UI event stream to arete emissions + text/tool/state callbacks, which the consumer routes through the Diff Engine.",
+  "description": "AG-UI (Agent-User Interaction) event decoder for arete-desktop — maps an AG-UI event stream to arete emissions + text/tool/state callbacks, which the consumer routes through the Diff Engine.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -24,10 +24,10 @@
     "@ag-ui/core": "^0.0.54"
   },
   "peerDependencies": {
-    "@arete-ui/core": "workspace:*"
+    "@arete-desktop/core": "workspace:*"
   },
   "devDependencies": {
-    "@arete-ui/core": "workspace:*",
+    "@arete-desktop/core": "workspace:*",
     "tsup": "^8.3.5",
     "typescript": "^5.6.3",
     "vitest": "^2.1.5"

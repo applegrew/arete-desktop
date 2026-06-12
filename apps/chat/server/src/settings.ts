@@ -1,4 +1,4 @@
-import type { McpConfig, McpServerEntry, AgentRuntimeOptions } from '@arete-ui/agent';
+import type { McpConfig, McpServerEntry, AgentRuntimeOptions } from '@arete-desktop/agent';
 import type { Store } from './db';
 
 /** One configurable MCP server: its connection entry plus an enable toggle. */

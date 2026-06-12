@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { McpConfig } from '@arete-ui/agent';
+import type { McpConfig } from '@arete-desktop/agent';
 import { getStore } from '../db';
 import { resolveSettings } from '../settings';
 

@@ -8,7 +8,7 @@ This repository is in the **design/bootstrapping phase** — only a README exist
 
 ## What This Is
 
-`arete-ui` is a React framework that adds four things on top of Google's A2UI v0.9 protocol, which A2UI itself does not provide:
+`arete-desktop` is a React framework that adds four things on top of Google's A2UI v0.9 protocol, which A2UI itself does not provide:
 
 1. A multi-tab application **Shell** with a dockable Chat panel
 2. A persistent multi-surface **Page** workspace (A2UI samples are single-pane only)
@@ -21,8 +21,8 @@ Core has **zero** fw-dew / Freshworks dependency. It is plug-in shaped: the cons
 
 ```
 packages/
-  core/                    # @arete-ui/core — Shell, Page, Chat, DiffOverlay, harness
-  adapter-dew/             # @arete-ui/adapter-dew — maps @freshworks/dew-components to A2UI catalog
+  core/                    # @arete-desktop/core — Shell, Page, Chat, DiffOverlay, harness
+  adapter-dew/             # @arete-desktop/adapter-dew — maps @freshworks/dew-components to A2UI catalog
 examples/
   erp-sandbox/             # Reference SPA (not part of core) — mock agent + SQLite persistence demo
 ```
@@ -41,7 +41,7 @@ When an agent message (`updateComponents` / `createSurface` / `deleteSurface`) a
 
 ### Page Operations Harness
 
-Operations are first-class arete-ui actions — NOT A2UI messages. They have their own JSON schemas. The harness ships only schemas and implementations; consumers wire them into their agent toolset (analogous to `SendA2uiToClientToolset`). **All harness ops go through the Diff Engine by default** (consumers can mark per-op `autoApprove`). All ops emit through the same `onProposed`/`onApprove`/`onReject` stream as content diffs.
+Operations are first-class arete-desktop actions — NOT A2UI messages. They have their own JSON schemas. The harness ships only schemas and implementations; consumers wire them into their agent toolset (analogous to `SendA2uiToClientToolset`). **All harness ops go through the Diff Engine by default** (consumers can mark per-op `autoApprove`). All ops emit through the same `onProposed`/`onApprove`/`onReject` stream as content diffs.
 
 v1 operations: `pinSurface`, `unpinSurface`, `setPageLayout`, `moveSurface`, `setPageRegion`.
 

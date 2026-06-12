@@ -1,22 +1,22 @@
 /**
- * AG-UI → arete-ui event decoder.
+ * AG-UI → arete-desktop event decoder.
  *
  * AG-UI (Agent-User Interaction protocol) is the agent↔frontend transport. This
- * decoder is a *pure mapping* from an AG-UI event stream to arete-ui-shaped
+ * decoder is a *pure mapping* from an AG-UI event stream to arete-desktop-shaped
  * callbacks — it owns no transport (the consumer feeds events from `@ag-ui/client`,
  * SSE, WebSocket, …) and no UI. The consumer routes the decoded results through
- * arete-ui's Diff Engine / Page Ops harness, keeping `@arete-ui/core` lean.
+ * arete-desktop's Diff Engine / Page Ops harness, keeping `@arete-desktop/core` lean.
  *
  * Convention for carrying arete UI mutations over AG-UI: the agent emits a
  * `CUSTOM` event named {@link ARETE_EMISSION_EVENT} whose `value` is an
  * `Emission` (`{ kind: 'a2ui', … }` | `{ kind: 'pageOp', … }`) from
- * `@arete-ui/core`. A2UI surface mutations and page ops thus ride AG-UI as
+ * `@arete-desktop/core`. A2UI surface mutations and page ops thus ride AG-UI as
  * first-class, typed custom events (text/tool/state use native AG-UI events).
  */
 import { EventType, type BaseEvent } from '@ag-ui/core';
-import type { Emission } from '@arete-ui/core';
+import type { Emission } from '@arete-desktop/core';
 
-/** CUSTOM event name that carries an arete-ui {@link Emission} as its `value`. */
+/** CUSTOM event name that carries an arete-desktop {@link Emission} as its `value`. */
 export const ARETE_EMISSION_EVENT = 'arete.emission';
 
 export interface TextStartInfo {

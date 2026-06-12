@@ -3,7 +3,7 @@ import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
 import { DataTable as PrimeDataTable, type DataTableRowClickEvent, type DataTablePageEvent } from 'primereact/datatable';
 import { Column } from 'primereact/column';
-import { useAction, useReportDiagnostics, type DiagnosticInput } from '@arete-ui/core';
+import { useAction, useReportDiagnostics, type DiagnosticInput } from '@arete-desktop/core';
 
 const actionSchema = z.object({
   event: z.object({

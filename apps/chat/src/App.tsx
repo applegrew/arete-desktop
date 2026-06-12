@@ -23,8 +23,8 @@ import {
   type UserAction,
   type SurfaceSnapshot,
   type ChatRole,
-} from '@arete-ui/core';
-import { primeReactCatalog, componentAgentHints } from '@arete-ui/adapter-primereact';
+} from '@arete-desktop/core';
+import { primeReactCatalog, componentAgentHints } from '@arete-desktop/adapter-primereact';
 import { streamAgent } from './agui-client';
 import {
   loadPages,

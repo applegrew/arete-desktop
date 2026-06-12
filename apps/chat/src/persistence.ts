@@ -1,4 +1,4 @@
-import type { LayoutDescriptor } from '@arete-ui/core';
+import type { LayoutDescriptor } from '@arete-desktop/core';
 
 const BASE = '/api';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };

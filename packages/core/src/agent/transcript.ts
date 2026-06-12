@@ -1,7 +1,7 @@
 /**
  * Conversation-transcript scaffold.
  *
- * arete-ui owns the chat transcript (via {@link ChatStore}) but NOT the agent
+ * arete-desktop owns the chat transcript (via {@link ChatStore}) but NOT the agent
  * loop or transport. This module turns the stored {@link ChatEntry} list into a
  * transport-agnostic message list a consumer's agent loop can thread into any
  * framework (Vercel AI SDK, LangChain, a raw fetch, …) as conversation history.

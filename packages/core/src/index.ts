@@ -11,7 +11,7 @@ export type { ChatProps, ChatMode } from './chat/Chat';
 export { ChatStore, useChatEntries } from './chat/ChatStore';
 export type { ChatEntry, ChatRole } from './chat/ChatStore';
 
-// Agent-loop scaffold — arete-ui provides the transcript, the emission/response
+// Agent-loop scaffold — arete-desktop provides the transcript, the emission/response
 // contract, and a context-snapshot builder; the loop itself is consumer-owned.
 export { entriesToTranscript } from './agent/transcript';
 export type { AgentMessage, AgentRole, TranscriptOptions } from './agent/transcript';

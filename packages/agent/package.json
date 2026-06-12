@@ -1,8 +1,8 @@
 {
-  "name": "@arete-ui/agent",
+  "name": "@arete-desktop/agent",
   "version": "0.0.1",
   "private": true,
-  "description": "Node agent runtime for arete-ui: a stateless AG-UI agent loop (Vercel AI SDK) with MCP tools and SKILL.md skills. Consumed by app servers; future standalone arete-agent swaps in over AG-UI.",
+  "description": "Node agent runtime for arete-desktop: a stateless AG-UI agent loop (Vercel AI SDK) with MCP tools and SKILL.md skills. Consumed by app servers; future standalone arete-agent swaps in over AG-UI.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -28,11 +28,11 @@
     "zod": "^4.0.16"
   },
   "peerDependencies": {
-    "@arete-ui/core": "workspace:*",
+    "@arete-desktop/core": "workspace:*",
     "express": "^4.21.0"
   },
   "devDependencies": {
-    "@arete-ui/core": "workspace:*",
+    "@arete-desktop/core": "workspace:*",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
     "express": "^4.21.0",

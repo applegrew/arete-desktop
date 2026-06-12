@@ -1,4 +1,4 @@
-import type { AgentContextSnapshot, RenderDiagnostic, SurfaceSnapshot, UserAction } from '@arete-ui/core';
+import type { AgentContextSnapshot, RenderDiagnostic, SurfaceSnapshot, UserAction } from '@arete-desktop/core';
 
 /**
  * The agent context the client sends, minus the conversation `messages`
@@ -82,11 +82,11 @@ function renderPages(pages?: AgentContext['pages']): string {
 }
 
 export function buildSystemPrompt(ctx: AgentContext, tools?: McpToolInfo[]): string {
-  return `You are an enterprise UI agent controlling a workspace via A2UI v0.9 protocol messages and arete-ui page operations.
+  return `You are an enterprise UI agent controlling a workspace via A2UI v0.9 protocol messages and arete-desktop page operations.
 
 The full prior conversation is provided to you as chat history (system/user/assistant turns). Use it to resolve references like "it", "that chart", "try again", and follow-up requests. Do NOT ask the user to repeat context that is already in the conversation history.
 
-Available components (arete-ui PrimeReact catalog):
+Available components (arete-desktop PrimeReact catalog):
 - Text: { id, component:"Text", text:"...", variant?:"h1"|"h2"|"h3"|"h4"|"h5"|"caption"|"body" }
 - Card: { id, component:"Card", child:"<childId>" }
 - Column: { id, component:"Column", children:["<id>",...] }
@@ -158,7 +158,7 @@ ${renderDiagnostics(ctx.diagnostics)}
 Any component MAY carry an optional "action" field shaped like {event: {name: string, context?: object}}. When set:
 - The component becomes interactive.
 - On user interaction, the framework dispatches a UserAction with name = action.event.name and a context that merges component-specific auto-context with the spec-declared context (spec wins on key conflicts).
-- The arete-ui consumer synthesizes a [USER ACTION] event "<name>" on surface <sid> (component <cid>); context: {...} prompt back to you on the next turn.
+- The arete-desktop consumer synthesizes a [USER ACTION] event "<name>" on surface <sid> (component <cid>); context: {...} prompt back to you on the next turn.
 
 Auto-context shapes per component (what arrives in context):
 - Button click → {} (no payload)

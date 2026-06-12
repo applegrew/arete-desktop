@@ -1,10 +1,10 @@
-import { AgUiDecoder, type AgUiHandlers } from '@arete-ui/agui';
-import type { AgentMessage } from '@arete-ui/core';
+import { AgUiDecoder, type AgUiHandlers } from '@arete-desktop/agui';
+import type { AgentMessage } from '@arete-desktop/core';
 
 /**
  * Thin AG-UI client: POST the turn to the agent's `/api/agui` endpoint, read the
  * SSE event stream, and feed each event into an `AgUiDecoder`. The transport is
- * consumer-owned (arete-ui ships no transport); the decoder hands normalized
+ * consumer-owned (arete-desktop ships no transport); the decoder hands normalized
  * results to `handlers`, which route them through the Diff Engine / harness.
  */
 export async function streamAgent(

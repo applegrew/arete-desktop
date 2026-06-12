@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
-  external: ['@arete-ui/core', '@ag-ui/core'],
+  external: ['@arete-desktop/core', '@ag-ui/core'],
 });

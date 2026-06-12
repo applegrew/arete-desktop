@@ -1,5 +1,5 @@
 {
-  "name": "@arete-ui/core",
+  "name": "@arete-desktop/core",
   "version": "0.0.1",
   "description": "Agent-driven Generative UI shell for enterprise apps, built on A2UI v0.9",
   "license": "Apache-2.0",

@@ -1,7 +1,7 @@
 /**
- * Agent ↔ arete-ui emission contract.
+ * Agent ↔ arete-desktop emission contract.
  *
- * The shared shape a consumer's agent loop must produce. arete-ui consumes
+ * The shared shape a consumer's agent loop must produce. arete-desktop consumes
  * these emissions (routing a2ui messages through the diff engine, applying page
  * ops through the harness) but does NOT produce them — the loop is consumer-
  * owned. Hoisting the contract here lets both the client and the agent server

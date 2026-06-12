@@ -1,6 +1,6 @@
 /**
  * Action types — the canonical A2UI v0.9 `action` spec (what the agent emits)
- * plus the resolved `UserAction` shape that arete-ui's runtime hands to consumers.
+ * plus the resolved `UserAction` shape that arete-desktop's runtime hands to consumers.
  */
 
 /**

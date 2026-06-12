@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
 import { Chart as PrimeChart } from 'primereact/chart';
-import { useAction, useReportDiagnostics, type DiagnosticInput } from '@arete-ui/core';
+import { useAction, useReportDiagnostics, type DiagnosticInput } from '@arete-desktop/core';
 
 const actionSchema = z.object({
   event: z.object({

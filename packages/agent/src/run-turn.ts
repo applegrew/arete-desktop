@@ -2,7 +2,7 @@ import { generateObject, generateText, stepCountIs, NoObjectGeneratedError, type
 import { createOllama } from 'ollama-ai-provider-v2';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { deepEqual, type AgentMessage } from '@arete-ui/core';
+import { deepEqual, type AgentMessage } from '@arete-desktop/core';
 import { buildSystemPrompt, type AgentContext, type McpToolInfo } from './prompt';
 import { getMcpTools, collectMcpResources, type McpUiResource } from './mcp';
 import { loadSkills, renderSkillsForPrompt } from './skills';
@@ -80,7 +80,7 @@ export async function agentHealth(
   }
 }
 
-/** Zod mirror of @arete-ui/core's AgentResponse *envelope*. A2UI message
+/** Zod mirror of @arete-desktop/core's AgentResponse *envelope*. A2UI message
  *  internals stay loose (`z.any()`); they're validated by the domain checks. */
 /** Page layout descriptor (kept loose on region shape, strict on `kind`). */
 const layoutSchema = z.object({

@@ -5,7 +5,7 @@ import { runAgentTurn, agentHealth, type AgentTurnRequest, type AgentRuntimeOpti
 import { setMcpConfig, type McpConfig } from './mcp-config';
 import { resetMcpTools, getMcpStatus } from './mcp';
 
-/** CUSTOM event name carrying an arete Emission — must match @arete-ui/agui's ARETE_EMISSION_EVENT. */
+/** CUSTOM event name carrying an arete Emission — must match @arete-desktop/agui's ARETE_EMISSION_EVENT. */
 const ARETE_EMISSION_EVENT = 'arete.emission';
 
 /** Options for {@link createAgentRouter}. Static `model`/`ollamaUrl`/`mcp` set the
@@ -26,7 +26,7 @@ export interface AgentRouterOptions extends AgentRuntimeOptions {
  *                      rationale+reply, CUSTOM "arete.emission" per emission, RUN_FINISHED).
  *  - `GET /health`   → Ollama liveness/model info.
  * arete UI mutations ride as CUSTOM "arete.emission" events (decoded client-side
- * by `@arete-ui/agui`); assistant text rides as native TEXT_MESSAGE_* events.
+ * by `@arete-desktop/agui`); assistant text rides as native TEXT_MESSAGE_* events.
  */
 export function createAgentRouter(opts: AgentRouterOptions = {}): Router {
   const router = Router();

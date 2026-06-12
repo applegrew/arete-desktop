@@ -29,7 +29,7 @@ export function useActionHarness(): ActionHarness | undefined {
  * actions dispatched from inside it can be tagged with provenance.
  *
  * Populated by `<DiffOverlay>` and `<Page>` render call sites — anywhere
- * arete-ui wraps an A2UI surface for rendering.
+ * arete-desktop wraps an A2UI surface for rendering.
  */
 const SurfaceIdContext = createContext<string | undefined>(undefined);
 

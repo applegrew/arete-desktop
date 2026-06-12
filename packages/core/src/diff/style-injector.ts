@@ -5,7 +5,7 @@
  * so repeat calls are no-ops. Safe to call from every DiffOverlay mount.
  */
 
-const STYLE_ID = 'arete-ui-diff-styles';
+const STYLE_ID = 'arete-desktop-diff-styles';
 
 const STYLE_CONTENT = `
   @keyframes arete-pulse-amber {
