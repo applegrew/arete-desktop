@@ -112,9 +112,12 @@ emission validation, MCP pre-step), `prompt.rs`/`prompt_template.txt`, `sse.rs` 
 `skills.rs` (SKILL.md → prompt), `log.rs` (rotating JSONL at `<app-data>/llm-logs`, disable with
 `ARETE_LLM_LOG=0`), `mcp.rs` (MCP client via `rmcp`). Skills live in `<app-data>/skills/<name>/SKILL.md`.
 
-**MCP is stdio-only** in the desktop build (`rmcp` `transport-child-process`). `http`/`sse`
-server entries connect-fail with a clear status message — wiring the rmcp HTTP transports is
-the remaining MCP work. Servers come from settings `mcpServers` (the single source; no `mcp.json`).
+**MCP transports**: `stdio` (`rmcp` `transport-child-process`) and `streamable-http`
+(`transport-streamable-http-client-reqwest` + **`reqwest-native-tls`** — rustls failed to connect
+to real servers, native/system TLS works). `headers.Authorization` → the config's `auth_header`
+(a reserved header rmcp manages); other headers → `custom_headers`. Legacy `sse` is not supported
+(rmcp 1.x has no standalone SSE client; use streamable-http). Servers come from settings
+`mcpServers` (the single source; no `mcp.json`).
 
 ### Backend port + API origin (dev and release identical)
 

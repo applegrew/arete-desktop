@@ -1,7 +1,12 @@
+use reqwest::header::{HeaderName, HeaderValue};
 use rmcp::model::CallToolRequestParams;
 use rmcp::service::RunningService;
+use rmcp::transport::streamable_http_client::{
+    StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+};
 use rmcp::{RoleClient, ServiceExt};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 use crate::server::state::AppState;
 
@@ -84,13 +89,20 @@ fn config_key(servers: &[(String, Value)]) -> String {
     Value::Array(items).to_string()
 }
 
-/// Connect to one stdio server and list its tools. http/sse are not yet supported
-/// in the desktop build (the rmcp HTTP transports are heavier to wire) — they
-/// return a clear error surfaced in the status panel.
+/// Connect to one server (stdio or streamable-http) and list its tools. Legacy
+/// `sse` is not supported (rmcp 1.x has no standalone SSE client; use streamable-http).
 async fn connect_and_list(entry: &Value) -> Result<(ClientService, Vec<Value>), String> {
     if entry.get("url").is_some() {
-        return Err("http/sse MCP transport is not yet supported in the desktop build (stdio only)".into());
+        let transport = entry.get("transport").and_then(|t| t.as_str()).unwrap_or("streamable-http");
+        if transport == "sse" {
+            return Err("legacy 'sse' MCP transport is not supported — use 'streamable-http'".into());
+        }
+        return connect_http(entry).await;
     }
+    connect_stdio(entry).await
+}
+
+async fn connect_stdio(entry: &Value) -> Result<(ClientService, Vec<Value>), String> {
     let command = entry
         .get("command")
         .and_then(|c| c.as_str())
@@ -114,6 +126,40 @@ async fn connect_and_list(entry: &Value) -> Result<(ClientService, Vec<Value>), 
 
     let transport = rmcp::transport::TokioChildProcess::new(cmd).map_err(|e| format!("{e}"))?;
     let service = ().serve(transport).await.map_err(|e| format!("{e}"))?;
+    list_and_pack(service).await
+}
+
+async fn connect_http(entry: &Value) -> Result<(ClientService, Vec<Value>), String> {
+    let url = entry.get("url").and_then(|u| u.as_str()).ok_or("http server missing \"url\"")?;
+
+    // `auth_header` carries Authorization (a reserved header rmcp manages itself);
+    // everything else rides as custom_headers.
+    let mut config = StreamableHttpClientTransportConfig::default();
+    config.uri = url.into();
+    let mut custom: HashMap<HeaderName, HeaderValue> = HashMap::new();
+    if let Some(headers) = entry.get("headers").and_then(|h| h.as_object()) {
+        for (k, v) in headers {
+            let val = match v.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            if k.eq_ignore_ascii_case("authorization") {
+                config.auth_header = Some(val.to_string());
+            } else if let (Ok(name), Ok(value)) =
+                (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(val))
+            {
+                custom.insert(name, value);
+            }
+        }
+    }
+    config.custom_headers = custom;
+
+    let transport = StreamableHttpClientTransport::from_config(config);
+    let service = ().serve(transport).await.map_err(|e| format!("{e}"))?;
+    list_and_pack(service).await
+}
+
+async fn list_and_pack(service: ClientService) -> Result<(ClientService, Vec<Value>), String> {
     let tools = service.list_all_tools().await.map_err(|e| format!("{e}"))?;
     let tool_values: Vec<Value> = tools.iter().filter_map(|t| serde_json::to_value(t).ok()).collect();
     Ok((service, tool_values))

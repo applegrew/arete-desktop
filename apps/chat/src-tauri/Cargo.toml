@@ -31,7 +31,7 @@ anyhow = "1"
 tracing = "0.1"
 tracing-appender = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-rmcp = { version = "1", features = ["client", "transport-child-process"] }
+rmcp = { version = "1", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest-native-tls"] }
 
 [features]
 # default Tauri custom-protocol feature for production builds
