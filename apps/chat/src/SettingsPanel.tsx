@@ -120,6 +120,14 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
       else next.add(name);
       return next;
     });
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const toggleTools = (name: string) =>
+    setExpandedTools((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
   // Reset the draft + refresh live MCP status each time the panel opens.
   useEffect(() => {
     if (!open) return;
@@ -270,10 +278,11 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
           const statusText = !st
             ? 'status unknown — save, then Reconnect'
             : st.connected
-              ? `connected · ${st.toolCount} tool${st.toolCount === 1 ? '' : 's'}${st.tools.length ? ` (${st.tools.join(', ')})` : ''}`
+              ? `Connected · ${st.toolCount} tool${st.toolCount === 1 ? '' : 's'}`
               : `failed: ${st.error ?? 'connection error'}`;
           const detail = st?.errorDetail ?? st?.error;
           const expanded = expandedErrors.has(s.name);
+          const toolsExpanded = expandedTools.has(s.name);
           const isEditing = editingName === s.name;
           return (
             <div
@@ -341,17 +350,50 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
                     )}
                   </>
                 ) : (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: !st ? '#777' : '#10b981',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {statusText}
-                  </div>
+                  <>
+                    <div
+                      onClick={() => (st && st.toolCount > 0 ? toggleTools(s.name) : undefined)}
+                      title={st && st.toolCount > 0 ? 'Show tools' : undefined}
+                      style={{
+                        fontSize: 11,
+                        color: !st ? '#777' : '#10b981',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        cursor: st && st.toolCount > 0 ? 'pointer' : 'default',
+                      }}
+                    >
+                      {st && st.toolCount > 0 && (
+                        <span style={{ flex: '0 0 auto' }}>{toolsExpanded ? '▼' : '▶'}</span>
+                      )}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {statusText}
+                      </span>
+                    </div>
+                    {toolsExpanded && st && (
+                      <ul
+                        style={{
+                          listStyle: 'none',
+                          margin: '4px 0 0',
+                          padding: '6px 8px',
+                          background: '#0d0d0d',
+                          border: '1px solid #1f2a1f',
+                          borderRadius: 4,
+                          maxHeight: 180,
+                          overflow: 'auto',
+                        }}
+                      >
+                        {(st.toolDetails ?? st.tools.map((n) => ({ name: n, description: undefined }))).map((t) => (
+                          <li key={t.name} style={{ marginBottom: 5 }}>
+                            <span style={{ color: '#d1fae5', fontFamily: 'monospace', fontSize: 11 }}>{t.name}</span>
+                            {t.description && (
+                              <div style={{ color: '#888', fontSize: 11, marginTop: 1 }}>{t.description}</div>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
                 )}
               </div>
               <button type="button" style={{ ...btn, padding: '2px 8px' }} onClick={() => removeServer(s.name)} aria-label={`Remove ${s.name}`}>

@@ -193,6 +193,7 @@ pub async fn ensure(state: &AppState) {
             Ok((service, tool_values)) => {
                 let server_idx = cache.services.len();
                 let mut names: Vec<String> = Vec::new();
+                let mut tool_details: Vec<Value> = Vec::new();
                 for tv in &tool_values {
                     let tname = tv.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
                     if tname.is_empty() {
@@ -205,6 +206,7 @@ pub async fn ensure(state: &AppState) {
                         .to_string();
                     let schema = tv.get("inputSchema").cloned().unwrap_or_else(|| json!({}));
                     names.push(tname.clone());
+                    tool_details.push(json!({ "name": tname, "description": desc }));
                     cache.tools.push(McpToolDef {
                         name: tname,
                         description: desc,
@@ -215,7 +217,7 @@ pub async fn ensure(state: &AppState) {
                 cache.services.push(service);
                 cache.statuses.push(json!({
                     "name": name, "transport": label, "connected": true,
-                    "toolCount": names.len(), "tools": names,
+                    "toolCount": names.len(), "tools": names, "toolDetails": tool_details,
                 }));
             }
             Err(e) => {

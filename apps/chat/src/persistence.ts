@@ -131,6 +131,8 @@ export interface McpServerStatus {
   connected: boolean;
   toolCount: number;
   tools: string[];
+  /** Tool name + description, shown in the expandable connected view. */
+  toolDetails?: { name: string; description?: string }[];
   error?: string;
   /** Full failure detail incl. cause chain — shown in the expandable error view. */
   errorDetail?: string;
