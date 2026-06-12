@@ -197,6 +197,12 @@ async fn connect_http(entry: &Value) -> Result<(ClientService, Vec<Value>), Stri
     // rmcp defaults to requiring a session and dies on the `initialized` notification
     // ("Transport channel closed"); allow_stateless makes it tolerate both.
     config.allow_stateless = true;
+    // Send ALL headers (including Authorization) VERBATIM. We deliberately do NOT use
+    // rmcp's `auth_header`, which force-prepends "Bearer ": some servers forward the
+    // Authorization header downstream and need the exact value the user configured —
+    // a raw API key, "Bearer <jwt>", "Basic …", etc. (The Freshservice platform MCP
+    // returns 403 from its downstream API when it receives "Bearer <rawkey>".)
+    // `authorization` is not a reserved header, so custom_headers carries it fine.
     let mut custom: HashMap<HeaderName, HeaderValue> = HashMap::new();
     if let Some(headers) = entry.get("headers").and_then(|h| h.as_object()) {
         for (k, v) in headers {
@@ -204,17 +210,7 @@ async fn connect_http(entry: &Value) -> Result<(ClientService, Vec<Value>), Stri
                 Some(s) => s,
                 None => continue,
             };
-            if k.eq_ignore_ascii_case("authorization") {
-                // rmcp prepends "Bearer " to `auth_header`, so store the BARE token
-                // — otherwise the server receives "Bearer Bearer <token>" → invalid.
-                let v = val.trim();
-                let token = if v.len() >= 7 && v[..7].eq_ignore_ascii_case("bearer ") {
-                    v[7..].trim_start()
-                } else {
-                    v
-                };
-                config.auth_header = Some(token.to_string());
-            } else if let (Ok(name), Ok(value)) =
+            if let (Ok(name), Ok(value)) =
                 (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(val))
             {
                 custom.insert(name, value);
