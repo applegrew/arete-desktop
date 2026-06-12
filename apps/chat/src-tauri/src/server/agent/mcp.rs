@@ -1,14 +1,71 @@
+use futures::stream::BoxStream;
 use reqwest::header::{HeaderName, HeaderValue};
-use rmcp::model::CallToolRequestParams;
+use rmcp::model::{CallToolRequestParams, ClientJsonRpcMessage};
 use rmcp::service::RunningService;
 use rmcp::transport::streamable_http_client::{
-    StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+    SseError, StreamableHttpClient, StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+    StreamableHttpError, StreamableHttpPostResponse,
 };
 use rmcp::{RoleClient, ServiceExt};
 use serde_json::{json, Value};
+use sse_stream::Sse;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::server::state::AppState;
+
+/// Wraps rmcp's reqwest HTTP client to tolerate a common non-compliant response:
+/// some MCP-over-HTTP servers answer notifications (e.g. `notifications/initialized`)
+/// with `200` and no `Content-Type` instead of the spec's `202 Accepted`. rmcp
+/// rejects that as `UnexpectedContentType` and closes the channel — we map it to
+/// `Accepted`. Everything else delegates unchanged.
+#[derive(Clone)]
+struct TolerantClient(reqwest_mcp::Client);
+
+impl StreamableHttpClient for TolerantClient {
+    type Error = reqwest_mcp::Error;
+
+    async fn post_message(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
+        match self
+            .0
+            .post_message(uri, message, session_id, auth_header, custom_headers)
+            .await
+        {
+            Err(StreamableHttpError::UnexpectedContentType(_)) => Ok(StreamableHttpPostResponse::Accepted),
+            other => other,
+        }
+    }
+
+    async fn delete_session(
+        &self,
+        uri: Arc<str>,
+        session_id: Arc<str>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<(), StreamableHttpError<Self::Error>> {
+        self.0.delete_session(uri, session_id, auth_header, custom_headers).await
+    }
+
+    async fn get_stream(
+        &self,
+        uri: Arc<str>,
+        session_id: Arc<str>,
+        last_event_id: Option<String>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<BoxStream<'static, Result<Sse, SseError>>, StreamableHttpError<Self::Error>> {
+        self.0
+            .get_stream(uri, session_id, last_event_id, auth_header, custom_headers)
+            .await
+    }
+}
 
 type ClientService = RunningService<RoleClient, ()>;
 
@@ -136,6 +193,10 @@ async fn connect_http(entry: &Value) -> Result<(ClientService, Vec<Value>), Stri
     // everything else rides as custom_headers.
     let mut config = StreamableHttpClientTransportConfig::default();
     config.uri = url.into();
+    // Many MCP-over-HTTP servers are stateless (no mcp-session-id, JSON not SSE).
+    // rmcp defaults to requiring a session and dies on the `initialized` notification
+    // ("Transport channel closed"); allow_stateless makes it tolerate both.
+    config.allow_stateless = true;
     let mut custom: HashMap<HeaderName, HeaderValue> = HashMap::new();
     if let Some(headers) = entry.get("headers").and_then(|h| h.as_object()) {
         for (k, v) in headers {
@@ -162,7 +223,12 @@ async fn connect_http(entry: &Value) -> Result<(ClientService, Vec<Value>), Stri
     }
     config.custom_headers = custom;
 
-    let transport = StreamableHttpClientTransport::from_config(config);
+    let http = reqwest_mcp::Client::builder()
+        .pool_max_idle_per_host(0)
+        .use_native_tls() // rustls failed to connect to real servers; system TLS works
+        .build()
+        .map_err(|e| format!("{e}"))?;
+    let transport = StreamableHttpClientTransport::with_client(TolerantClient(http), config);
     let service = ().serve(transport).await.map_err(|e| format!("{e}"))?;
     list_and_pack(service).await
 }

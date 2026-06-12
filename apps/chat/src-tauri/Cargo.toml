@@ -32,6 +32,10 @@ tracing = "0.1"
 tracing-appender = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rmcp = { version = "1", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest-native-tls"] }
+# Same reqwest as rmcp (0.13), aliased so we can build/wrap its HTTP client.
+reqwest_mcp = { package = "reqwest", version = "0.13" }
+futures = "0.3"
+sse-stream = "0.2"
 
 [features]
 # default Tauri custom-protocol feature for production builds
