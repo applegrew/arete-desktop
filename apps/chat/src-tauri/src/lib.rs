@@ -15,16 +15,37 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir).ok();
             let db_path = data_dir.join("arete-chat.db");
 
+            // Rotating LLM interaction logs live alongside the DB.
+            server::agent::log::set_log_dir(data_dir.join("llm-logs"));
+
             let state = server::state::AppState::new(&db_path).expect("failed to init database");
 
             // axum runs on its own tokio runtime in a background thread; loopback only.
+            let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
                 rt.block_on(async move {
-                    if let Err(e) = server::run("127.0.0.1:8787", state).await {
+                    if let Err(e) = server::run("127.0.0.1:8787", state, ready_tx).await {
                         eprintln!("[arete-chat] server error: {e}");
                     }
                 });
+            });
+
+            // Release: the webview is served from the bundle (tauri://) where relative
+            // /api can't reach axum. Once the server is up, navigate to the same-origin
+            // server so /api works. Dev keeps the vite devUrl (+ proxy).
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let _ = ready_rx.recv();
+                #[cfg(not(debug_assertions))]
+                if let Some(win) = handle.get_webview_window("main") {
+                    if let Ok(url) = "http://127.0.0.1:8787/".parse() {
+                        let _ = win.navigate(url);
+                    }
+                    let _ = win.show();
+                }
+                #[cfg(debug_assertions)]
+                let _ = &handle;
             });
 
             Ok(())

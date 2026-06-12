@@ -67,4 +67,20 @@ impl Sink {
     pub async fn emission(&self, value: &Value) {
         self.send(json!({ "type": CUSTOM, "name": ARETE_EMISSION_EVENT, "value": value })).await;
     }
+
+    pub async fn tool_call_start(&self, id: &str, name: &str) {
+        self.send(json!({ "type": TOOL_CALL_START, "toolCallId": id, "toolCallName": name })).await;
+    }
+
+    pub async fn tool_call_result(&self, id: &str, content: &str, is_error: bool) {
+        self.send(json!({
+            "type": TOOL_CALL_RESULT, "toolCallId": id, "messageId": format!("tool:{id}"),
+            "content": content, "isError": is_error,
+        }))
+        .await;
+    }
+
+    pub async fn tool_call_end(&self, id: &str) {
+        self.send(json!({ "type": TOOL_CALL_END, "toolCallId": id })).await;
+    }
 }

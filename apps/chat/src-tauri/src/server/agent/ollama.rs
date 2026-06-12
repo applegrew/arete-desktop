@@ -1,34 +1,27 @@
-use anyhow::Result;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-/// A chat message sent to Ollama (`/api/chat`).
-#[derive(Clone)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-}
-
-impl ChatMessage {
-    pub fn system(s: impl Into<String>) -> Self {
-        Self { role: "system".into(), content: s.into() }
-    }
-    pub fn user(s: impl Into<String>) -> Self {
-        Self { role: "user".into(), content: s.into() }
-    }
-    pub fn assistant(s: impl Into<String>) -> Self {
-        Self { role: "assistant".into(), content: s.into() }
-    }
-    fn to_json(&self) -> Value {
-        json!({ "role": self.role, "content": self.content })
-    }
-}
-
 /// Thin Ollama client mirroring what `ollama-ai-provider-v2` POSTs to `/api/chat`.
+/// Messages are raw JSON objects (`{role, content, ...}`) so tool-call and tool
+/// result messages flow through the conversation unchanged.
 pub struct Ollama {
     base: String, // e.g. http://localhost:11434
     http: reqwest::Client,
     pub model: String,
+}
+
+/// One tool call requested by the model in a tool-calling step.
+pub struct RawToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: Value,
+}
+
+/// Result of a tool-calling chat step.
+pub struct ChatStep {
+    /// The assistant message verbatim (incl. any tool_calls) — pushed back into the convo.
+    pub message: Value,
+    pub tool_calls: Vec<RawToolCall>,
 }
 
 impl Ollama {
@@ -41,16 +34,15 @@ impl Ollama {
     }
 
     /// `generateObject` equivalent: POST `/api/chat` with `format = schema` so Ollama
-    /// constrains decoding to the schema, then parse `message.content` as JSON.
-    /// Returns the parsed object, or an error carrying the raw text on parse failure.
+    /// constrains decoding, then parse `message.content` as JSON.
     pub async fn generate_object(
         &self,
-        messages: &[ChatMessage],
+        messages: &[Value],
         schema: Value,
     ) -> Result<Value, ParseError> {
         let body = json!({
             "model": self.model,
-            "messages": messages.iter().map(|m| m.to_json()).collect::<Vec<_>>(),
+            "messages": messages,
             "stream": false,
             "format": schema,
         });
@@ -64,10 +56,7 @@ impl Ollama {
         if !resp.status().is_success() {
             let status = resp.status();
             let txt = resp.text().await.unwrap_or_default();
-            return Err(ParseError {
-                message: format!("ollama returned {status}: {txt}"),
-                raw: None,
-            });
+            return Err(ParseError { message: format!("ollama returned {status}: {txt}"), raw: None });
         }
         let v: Value = resp
             .json()
@@ -85,7 +74,68 @@ impl Ollama {
         })
     }
 
-    /// Liveness/info probe used by `/api/agui/health` — GET `/api/tags`, 2s timeout.
+    /// A tool-calling step: POST `/api/chat` with `tools` (no `format`). Returns the
+    /// assistant message and any requested tool calls. `tool_infos` are
+    /// `[{name, description, parameters}]` (from MCP discovery).
+    pub async fn chat_with_tools(
+        &self,
+        messages: &[Value],
+        tool_infos: &[Value],
+    ) -> Result<ChatStep, String> {
+        let tools: Vec<Value> = tool_infos
+            .iter()
+            .map(|t| {
+                json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.get("name").cloned().unwrap_or(Value::Null),
+                        "description": t.get("description").cloned().unwrap_or(Value::Null),
+                        "parameters": t.get("parameters").cloned().unwrap_or_else(|| json!({})),
+                    }
+                })
+            })
+            .collect();
+        let body = json!({
+            "model": self.model,
+            "messages": messages,
+            "stream": false,
+            "tools": tools,
+        });
+        let resp = self
+            .http
+            .post(format!("{}/api/chat", self.base))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("ollama request failed: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("ollama returned {}", resp.status()));
+        }
+        let v: Value = resp.json().await.map_err(|e| format!("ollama response not JSON: {e}"))?;
+        let message = v.get("message").cloned().unwrap_or_else(|| json!({ "role": "assistant", "content": "" }));
+
+        let mut calls = Vec::new();
+        if let Some(tcs) = message.get("tool_calls").and_then(|t| t.as_array()) {
+            for (i, tc) in tcs.iter().enumerate() {
+                let func = tc.get("function");
+                let name = func
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let arguments = func.and_then(|f| f.get("arguments")).cloned().unwrap_or_else(|| json!({}));
+                // Ollama tool calls have no id; synthesize a stable one.
+                let id = format!("call-{}-{}", i, &uuid::Uuid::new_v4().simple().to_string()[..6]);
+                calls.push(RawToolCall { id, name, arguments });
+            }
+        }
+        Ok(ChatStep { message, tool_calls: calls })
+    }
+
+    /// Liveness/info probe — GET `/api/tags`, 2s timeout.
     pub async fn health(&self) -> Value {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(2))

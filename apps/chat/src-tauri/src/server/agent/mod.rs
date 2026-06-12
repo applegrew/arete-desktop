@@ -1,6 +1,9 @@
+pub mod log;
+pub mod mcp;
 pub mod ollama;
 pub mod prompt;
 pub mod schema;
+pub mod skills;
 pub mod sse;
 pub mod turn;
 
@@ -37,12 +40,15 @@ pub async fn health(State(st): State<AppState>) -> Json<Value> {
     Json(ollama.health().await)
 }
 
-// MCP is deferred (Phase 3) — no servers, empty status.
-pub async fn mcp_status() -> Json<Value> {
-    Json(json!([]))
+/// GET /api/agui/mcp-status — per-server connection status (discovers if needed).
+pub async fn mcp_status(State(st): State<AppState>) -> Json<Value> {
+    Json(Value::Array(mcp::status(&st).await))
 }
-pub async fn mcp_reconnect() -> Json<Value> {
-    Json(json!([]))
+
+/// POST /api/agui/mcp-reconnect — drop connections, rediscover against live config.
+pub async fn mcp_reconnect(State(st): State<AppState>) -> Json<Value> {
+    mcp::reset(&st).await;
+    Json(Value::Array(mcp::status(&st).await))
 }
 
 /// POST /api/agui — run one agent turn and stream the result as an AG-UI SSE stream.
@@ -61,8 +67,16 @@ pub async fn run_turn(State(st): State<AppState>, Json(body): Json<Value>) -> Re
         let sink = Sink::new(tx);
         sink.run_started(&thread_id, &run_id).await;
 
-        match run_agent_turn(&body, &ollama).await {
+        match run_agent_turn(&st, &body, &ollama).await {
             Ok(outcome) => {
+                // Tool calls (via MCP) → native AG-UI tool-call events, before text.
+                for tc in &outcome.tool_calls {
+                    sink.tool_call_start(&tc.id, &tc.name).await;
+                    if let Some(result) = &tc.result {
+                        sink.tool_call_result(&tc.id, result, tc.is_error).await;
+                    }
+                    sink.tool_call_end(&tc.id).await;
+                }
                 if let Some(rationale) = &outcome.rationale {
                     sink.emit_text(&format!("thinking:{run_id}"), rationale, "assistant").await;
                 }

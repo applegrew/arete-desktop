@@ -1,27 +1,46 @@
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 
-use super::ollama::{ChatMessage, Ollama};
+use super::log::log_llm;
+use super::mcp::{self, McpUiResource};
+use super::ollama::Ollama;
 use super::prompt::build_system_prompt;
 use super::schema::envelope_schema;
+use super::skills::{load_skills, render_skills_for_prompt};
+use crate::server::state::AppState;
 
 /// Max corrective re-asks (shared budget across parse + domain failures).
 const MAX_CORRECTIONS: usize = 2;
+/// Max MCP tool-calling rounds in the pre-step (matches Node's `stepCountIs(4)`).
+const MAX_TOOL_ROUNDS: usize = 4;
 const BASIC_CATALOG_ID: &str = "https://a2ui.org/specification/v0_9/basic_catalog.json";
+
+/// A tool the agent called during a turn (surfaced as AG-UI TOOL_CALL events).
+pub struct ToolCallRecord {
+    pub id: String,
+    pub name: String,
+    pub result: Option<String>,
+    pub is_error: bool,
+}
 
 /// A successful turn's result (mirrors AgentOutcome::ok).
 pub struct Outcome {
     pub validated: Vec<Value>,
     pub rationale: Option<String>,
     pub reply: Option<String>,
+    pub tool_calls: Vec<ToolCallRecord>,
 }
 
 /// Error: (http status, body). Mirrors AgentOutcome::err.
 pub type TurnError = (u16, Value);
 
-/// Run one agent turn end-to-end. MCP/tools are not yet wired (Phase 3), so the
-/// pre-step is skipped — the model creates surfaces from its own knowledge.
-pub async fn run_agent_turn(body: &Value, ollama: &Ollama) -> Result<Outcome, TurnError> {
+/// Run one agent turn end-to-end: discover MCP tools → system prompt (+skills) →
+/// optional MCP pre-step → structured emission + correction loop → MCP-UI embeds.
+pub async fn run_agent_turn(
+    state: &AppState,
+    body: &Value,
+    ollama: &Ollama,
+) -> Result<Outcome, TurnError> {
     let prompt = body.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
     if prompt.is_empty() {
         return Err((400, json!({ "error": "Missing prompt" })));
@@ -29,48 +48,121 @@ pub async fn run_agent_turn(body: &Value, ollama: &Ollama) -> Result<Outcome, Tu
     let empty_ctx = default_context();
     let ctx = body.get("context").filter(|c| c.is_object()).unwrap_or(&empty_ctx);
 
-    let system = build_system_prompt(ctx, &[]);
+    // Discover MCP tools BEFORE building the prompt so the model knows what's available.
+    mcp::ensure(state).await;
+    let tool_infos = mcp::tool_infos(state).await;
 
-    // Thread prior conversation (history) + current prompt; system is passed separately,
-    // so drop any system turns from the transcript.
-    let mut convo: Vec<ChatMessage> = Vec::new();
-    convo.push(ChatMessage::system(system));
+    let skills = render_skills_for_prompt(&load_skills(&state.skills_dir()));
+    let system = format!("{}{}", build_system_prompt(ctx, &tool_infos), skills);
+
+    let history_len = body.get("messages").and_then(|m| m.as_array()).map(|a| a.len()).unwrap_or(0);
+    log_llm(json!({
+        "phase": "turn.start", "model": ollama.model,
+        "promptChars": prompt.len(), "historyLen": history_len, "tools": tool_infos.len(),
+    }));
+
+    // Thread prior conversation (history) + current prompt; system passed separately.
+    let mut convo: Vec<Value> = vec![json!({ "role": "system", "content": system })];
     if let Some(msgs) = body.get("messages").and_then(|m| m.as_array()) {
         for m in msgs {
             let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
             let content = m.get("content").and_then(|c| c.as_str()).unwrap_or("");
-            match role {
-                "user" => convo.push(ChatMessage::user(content)),
-                "assistant" => convo.push(ChatMessage::assistant(content)),
-                _ => {}
+            if role == "user" || role == "assistant" {
+                convo.push(json!({ "role": role, "content": content }));
             }
         }
     }
-    convo.push(ChatMessage::user(prompt));
+    convo.push(json!({ "role": "user", "content": prompt }));
 
-    run_with_correction(ollama, convo, ctx).await
+    // MCP tool pre-step (failure-tolerant; skipped when no tools).
+    let mut tool_calls: Vec<ToolCallRecord> = Vec::new();
+    let mut ui_resources: Vec<McpUiResource> = Vec::new();
+    if !tool_infos.is_empty() {
+        pre_step(state, ollama, &tool_infos, &mut convo, &mut tool_calls, &mut ui_resources).await;
+    }
+
+    match run_with_correction(ollama, convo, ctx).await {
+        Ok(mut outcome) => {
+            // Render captured MCP-UI resources as their own surfaces (framework-driven).
+            for r in &ui_resources {
+                outcome.validated.push(build_embed_emission(r));
+            }
+            outcome.tool_calls = tool_calls;
+            log_llm(json!({
+                "phase": "turn.ok", "emissions": outcome.validated.len(),
+                "toolCalls": outcome.tool_calls.len(), "uiResources": ui_resources.len(),
+            }));
+            Ok(outcome)
+        }
+        Err((status, body)) => {
+            log_llm(json!({ "phase": "turn.failed", "status": status, "body": body }));
+            Err((status, body))
+        }
+    }
+}
+
+/// Let the model call MCP tools (multi-step) before the envelope step. Any error
+/// skips the pre-step cleanly (matches `run-turn.ts`).
+async fn pre_step(
+    state: &AppState,
+    ollama: &Ollama,
+    tool_infos: &[Value],
+    convo: &mut Vec<Value>,
+    tool_calls: &mut Vec<ToolCallRecord>,
+    ui: &mut Vec<McpUiResource>,
+) {
+    for _ in 0..MAX_TOOL_ROUNDS {
+        let step = match ollama.chat_with_tools(convo, tool_infos).await {
+            Ok(s) => s,
+            Err(e) => {
+                log_llm(json!({ "phase": "prestep.error", "error": e }));
+                return;
+            }
+        };
+        if step.tool_calls.is_empty() {
+            convo.push(step.message); // final assistant text → keep for context
+            return;
+        }
+        convo.push(step.message); // assistant message carrying the tool_calls
+        for tc in step.tool_calls {
+            let outcome = mcp::call(state, &tc.name, tc.arguments.clone()).await;
+            log_llm(json!({ "phase": "prestep.tool", "tool": tc.name, "isError": outcome.is_error }));
+            convo.push(json!({ "role": "tool", "content": outcome.text.clone(), "tool_name": tc.name.clone() }));
+            tool_calls.push(ToolCallRecord {
+                id: tc.id,
+                name: tc.name,
+                result: Some(outcome.text),
+                is_error: outcome.is_error,
+            });
+            ui.extend(outcome.ui);
+        }
+    }
 }
 
 async fn run_with_correction(
     ollama: &Ollama,
-    mut convo: Vec<ChatMessage>,
+    mut convo: Vec<Value>,
     ctx: &Value,
 ) -> Result<Outcome, TurnError> {
     let mut corrections = 0usize;
     loop {
+        log_llm(json!({ "phase": "envelope.request", "attempt": corrections }));
         let envelope = match ollama.generate_object(&convo, envelope_schema()).await {
-            Ok(v) if v.is_object() => v,
+            Ok(v) if v.is_object() => {
+                log_llm(json!({ "phase": "envelope.response", "attempt": corrections, "envelope": v }));
+                v
+            }
             Ok(v) => {
-                // Parsed JSON but not an object — treat like a parse failure.
                 if corrections < MAX_CORRECTIONS {
                     corrections += 1;
-                    convo.push(ChatMessage::assistant(v.to_string()));
-                    convo.push(ChatMessage::user(parse_retry_msg("expected a JSON object")));
+                    convo.push(json!({ "role": "assistant", "content": v.to_string() }));
+                    convo.push(json!({ "role": "user", "content": parse_retry_msg("expected a JSON object") }));
                     continue;
                 }
                 return Err((502, json!({ "error": "Agent did not return a JSON object" })));
             }
             Err(pe) => {
+                log_llm(json!({ "phase": "envelope.parse_error", "attempt": corrections, "cause": pe.message }));
                 if corrections < MAX_CORRECTIONS {
                     corrections += 1;
                     let raw = pe.raw.clone().unwrap_or_default();
@@ -79,8 +171,8 @@ async fn run_with_correction(
                     } else {
                         raw
                     };
-                    convo.push(ChatMessage::assistant(asst));
-                    convo.push(ChatMessage::user(parse_retry_msg(&pe.message)));
+                    convo.push(json!({ "role": "assistant", "content": asst }));
+                    convo.push(json!({ "role": "user", "content": parse_retry_msg(&pe.message) }));
                     continue;
                 }
                 return Err((
@@ -98,13 +190,14 @@ async fn run_with_correction(
         let result = process_emissions(&emissions, ctx);
 
         if !result.issues.is_empty() {
+            log_llm(json!({ "phase": "validation.issues", "attempt": corrections, "issues": result.issues }));
             if corrections < MAX_CORRECTIONS {
                 corrections += 1;
-                convo.push(ChatMessage::assistant(envelope.to_string()));
-                convo.push(ChatMessage::user(format!(
+                convo.push(json!({ "role": "assistant", "content": envelope.to_string() }));
+                convo.push(json!({ "role": "user", "content": format!(
                     "Your previous response had these issues:\n- {}\n\nFix every issue and resend the corrected JSON only. Same schema, no commentary.",
                     result.issues.join("\n- ")
-                )));
+                ) }));
                 continue;
             }
             return Err((
@@ -114,13 +207,14 @@ async fn run_with_correction(
         }
 
         if !result.noops.is_empty() {
+            log_llm(json!({ "phase": "validation.noops", "attempt": corrections, "noops": result.noops }));
             if corrections < MAX_CORRECTIONS {
                 corrections += 1;
-                convo.push(ChatMessage::assistant(envelope.to_string()));
-                convo.push(ChatMessage::user(format!(
+                convo.push(json!({ "role": "assistant", "content": envelope.to_string() }));
+                convo.push(json!({ "role": "user", "content": format!(
                     "Your updateComponents for surface(s) [{}] is identical to what is already rendered — it changes nothing. Do NOT claim you changed or fixed it. If the user's request cannot be satisfied by changing the component spec (e.g. it concerns how the component renders, which you do not control), say so briefly and honestly in \"reply\" and return an empty emissions array. Otherwise, emit a genuinely different spec that addresses the request.",
                     result.noops.join(", ")
-                )));
+                ) }));
                 continue;
             }
             let noop_set: HashSet<&str> = result.noops.iter().map(|s| s.as_str()).collect();
@@ -139,6 +233,7 @@ async fn run_with_correction(
                 validated: cleaned,
                 rationale: env_str(&envelope, "rationale"),
                 reply: env_str(&envelope, "reply"),
+                tool_calls: Vec::new(),
             });
         }
 
@@ -146,8 +241,35 @@ async fn run_with_correction(
             validated: result.validated,
             rationale: env_str(&envelope, "rationale"),
             reply: env_str(&envelope, "reply"),
+            tool_calls: Vec::new(),
         });
     }
+}
+
+/// Wrap an MCP-UI resource into an A2UI emission rendering a sandboxed Embed surface.
+fn build_embed_emission(r: &McpUiResource) -> Value {
+    let sid = mint_surface_id();
+    let mut embed = json!({ "id": "root", "component": "Embed", "title": r.tool });
+    if let Some(h) = &r.html {
+        embed["html"] = json!(h);
+    }
+    if let Some(u) = &r.url {
+        embed["url"] = json!(u);
+    }
+    if let Some(m) = &r.mime_type {
+        embed["mimeType"] = json!(m);
+    }
+    if let Some(uri) = &r.uri {
+        embed["uri"] = json!(uri);
+    }
+    json!({
+        "kind": "a2ui",
+        "targetSurfaceId": sid,
+        "messages": [
+            { "version": "v0.9", "createSurface": { "surfaceId": sid, "catalogId": BASIC_CATALOG_ID, "sendDataModel": true } },
+            { "version": "v0.9", "updateComponents": { "surfaceId": sid, "components": [embed] } }
+        ]
+    })
 }
 
 fn parse_retry_msg(cause: &str) -> String {
@@ -468,7 +590,3 @@ fn default_context() -> Value {
         "diagnostics": []
     })
 }
-
-/// Catalog id (unused until MCP-UI embeds land in Phase 3); kept for parity.
-#[allow(dead_code)]
-pub const CATALOG_ID: &str = BASIC_CATALOG_ID;

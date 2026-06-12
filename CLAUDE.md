@@ -104,6 +104,27 @@ The `arete-chat` app ships as a Tauri v2 desktop app. The Rust process embeds an
 contract byte-for-byte, so the React frontend is unchanged. Persistence is `rusqlite`
 (bundled) in the per-OS app-data dir. Run with `pnpm tauri:dev` (or `pnpm dev` from root).
 
+### Agent runtime (Rust port of `packages/agent`)
+
+The agent loop lives in `src-tauri/src/server/agent/`: `ollama.rs` (structured output
+via `/api/chat` `format`, plus a tool-calling step), `turn.rs` (envelope + correction loop,
+emission validation, MCP pre-step), `prompt.rs`/`prompt_template.txt`, `sse.rs` (AG-UI frames),
+`skills.rs` (SKILL.md → prompt), `log.rs` (rotating JSONL at `<app-data>/llm-logs`, disable with
+`ARETE_LLM_LOG=0`), `mcp.rs` (MCP client via `rmcp`). Skills live in `<app-data>/skills/<name>/SKILL.md`.
+
+**MCP is stdio-only** in the desktop build (`rmcp` `transport-child-process`). `http`/`sse`
+server entries connect-fail with a clear status message — wiring the rmcp HTTP transports is
+the remaining MCP work. Servers come from settings `mcpServers` (the single source; no `mcp.json`).
+
+### Packaging: dev vs release origin
+
+- **Dev** (`pnpm tauri dev`, debug): webview loads vite at `:5173`; vite proxies `/api` → axum `:8787`.
+- **Release** (`pnpm tauri build`): the frontend is embedded (`rust-embed` over `../dist`, gated
+  `#[cfg(not(debug_assertions))]`) and served by axum, and the window navigates to
+  `http://127.0.0.1:8787` so the SPA + `/api` share one origin. `tauri build --debug` does NOT get
+  this (it's a debug build) — use a full release `tauri build` to test the bundle. Single-instance:
+  the app assumes it owns `:8787`.
+
 ### Build gotcha: pin `time` to 0.3.47
 
 **`time 0.3.48` does not compile** with bleeding-edge rustc (e.g. Homebrew rustc 1.96):
