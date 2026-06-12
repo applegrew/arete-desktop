@@ -15,8 +15,6 @@ export interface A2uiEmission {
   kind: 'a2ui';
   targetSurfaceId: string;
   messages: A2uiInboundMessage[];
-  /** When true, the client snapshots the surface's prior state for Widget Manager Back. */
-  pushHistory?: boolean;
 }
 
 /** A structural page operation (pin/move/layout/region). */

@@ -41,6 +41,10 @@ pub fn init(path: &Path) -> Result<Connection> {
     if !table_has_column(&conn, "surfaces", "handlers_json")? {
         conn.execute_batch("ALTER TABLE surfaces ADD COLUMN handlers_json TEXT")?;
     }
+    // Migration: add surfaces.history_json (generic per-surface state timeline).
+    if !table_has_column(&conn, "surfaces", "history_json")? {
+        conn.execute_batch("ALTER TABLE surfaces ADD COLUMN history_json TEXT")?;
+    }
 
     // First-boot seed so partial settings saves still yield a complete object.
     if get_settings(&conn)?.is_none() {
@@ -133,18 +137,20 @@ pub fn delete_page(conn: &Connection, id: &str) -> Result<()> {
 
 pub fn list_surfaces(conn: &Connection) -> Result<Vec<ApiSurface>> {
     let mut stmt = conn.prepare(
-        "SELECT surface_id, components_json, data_model_json, updated_at, handlers_json FROM surfaces",
+        "SELECT surface_id, components_json, data_model_json, updated_at, handlers_json, history_json FROM surfaces",
     )?;
     let rows = stmt.query_map([], |r| {
         let comp: String = r.get(1)?;
         let dm: String = r.get(2)?;
         let handlers: Option<String> = r.get(4)?;
+        let history: Option<String> = r.get(5)?;
         Ok(ApiSurface {
             surface_id: r.get(0)?,
             components: safe_parse(&comp, json!([])),
             data_model: safe_parse(&dm, json!({})),
             updated_at: r.get(3)?,
             handlers: handlers.map(|h| safe_parse(&h, json!({}))).unwrap_or_else(|| json!({})),
+            history: history.map(|h| safe_parse(&h, json!([]))).unwrap_or_else(|| json!([])),
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -156,15 +162,16 @@ pub fn replace_surfaces(conn: &mut Connection, surfaces: &[ApiSurface]) -> Resul
     tx.execute("DELETE FROM surfaces", [])?;
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO surfaces (surface_id, components_json, data_model_json, updated_at, handlers_json)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT OR REPLACE INTO surfaces (surface_id, components_json, data_model_json, updated_at, handlers_json, history_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
         for s in surfaces {
             let comp = serde_json::to_string(&s.components)?;
             let dm = serde_json::to_string(&s.data_model)?;
             let handlers = serde_json::to_string(&s.handlers)?;
+            let history = serde_json::to_string(&s.history)?;
             let updated = if s.updated_at == 0 { now } else { s.updated_at };
-            stmt.execute(params![s.surface_id, comp, dm, updated, handlers])?;
+            stmt.execute(params![s.surface_id, comp, dm, updated, handlers, history])?;
         }
     }
     tx.commit()?;

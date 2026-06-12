@@ -26,6 +26,13 @@ export interface SurfaceSnapshot {
   visibleOnActivePage: boolean;
   /** The region id it occupies on the active page, if pinned. */
   region?: string;
+  /**
+   * Generic per-surface state timeline (oldest→newest): each entry is
+   * `{ seq, ts, trigger, components, dataModel? }`. Consumed by the agent's
+   * getSurfaceHistory tool so the LLM can study prior states (e.g. to restore a
+   * previous view). Not rendered into the prompt body.
+   */
+  history?: unknown[];
 }
 
 /** A page's current layout + surfaceId→regionId mapping. */

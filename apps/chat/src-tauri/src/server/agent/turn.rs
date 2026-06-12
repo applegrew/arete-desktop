@@ -2,7 +2,7 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 
 use super::log::log_llm;
-use super::mcp::{self, McpUiResource};
+use super::mcp::{self, McpUiResource, ToolOutcome};
 use super::ollama::Ollama;
 use super::prompt::build_system_prompt;
 use super::schema::envelope_schema;
@@ -50,7 +50,11 @@ pub async fn run_agent_turn(
 
     // Discover MCP tools BEFORE building the prompt so the model knows what's available.
     mcp::ensure(state).await;
-    let tool_infos = mcp::tool_infos(state).await;
+    let mut tool_infos = mcp::tool_infos(state).await;
+    // Offer the built-in getSurfaceHistory tool only when some surface actually has
+    // a timeline — so a fresh chat with no MCP tools pays no pre-step cost, but once
+    // surfaces accumulate states the LLM can study them.
+    tool_infos.extend(builtin_tools(ctx));
 
     let skills = render_skills_for_prompt(&load_skills(&state.skills_dir()));
     let system = format!("{}{}", build_system_prompt(ctx, &tool_infos), skills);
@@ -78,7 +82,7 @@ pub async fn run_agent_turn(
     let mut tool_calls: Vec<ToolCallRecord> = Vec::new();
     let mut ui_resources: Vec<McpUiResource> = Vec::new();
     if !tool_infos.is_empty() {
-        pre_step(state, ollama, &tool_infos, &mut convo, &mut tool_calls, &mut ui_resources).await;
+        pre_step(state, ollama, &tool_infos, ctx, &mut convo, &mut tool_calls, &mut ui_resources).await;
     }
 
     match run_with_correction(ollama, convo, ctx).await {
@@ -122,6 +126,7 @@ async fn pre_step(
     state: &AppState,
     ollama: &Ollama,
     tool_infos: &[Value],
+    ctx: &Value,
     convo: &mut Vec<Value>,
     tool_calls: &mut Vec<ToolCallRecord>,
     ui: &mut Vec<McpUiResource>,
@@ -140,7 +145,12 @@ async fn pre_step(
         }
         convo.push(step.message); // assistant message carrying the tool_calls
         for tc in step.tool_calls {
-            let outcome = mcp::call(state, &tc.name, tc.arguments.clone()).await;
+            // Built-in tools resolve locally against the turn's context (no MCP).
+            let outcome = if tc.name == "getSurfaceHistory" {
+                get_surface_history(ctx, &tc.arguments)
+            } else {
+                mcp::call(state, &tc.name, tc.arguments.clone()).await
+            };
             log_llm(json!({ "phase": "prestep.tool", "tool": tc.name, "isError": outcome.is_error }));
             convo.push(json!({ "role": "tool", "content": outcome.text.clone(), "tool_name": tc.name.clone() }));
             tool_calls.push(ToolCallRecord {
@@ -152,6 +162,57 @@ async fn pre_step(
             ui.extend(outcome.ui);
         }
     }
+}
+
+/// Built-in (non-MCP) tools offered to the model. `getSurfaceHistory` is offered
+/// only when at least one surface in `ctx` carries a non-empty timeline, so turns
+/// without any history pay no pre-step cost.
+fn builtin_tools(ctx: &Value) -> Vec<Value> {
+    let has_history = ctx
+        .get("surfaces")
+        .and_then(|s| s.as_object())
+        .map(|surfaces| {
+            surfaces.values().any(|s| {
+                s.get("history").and_then(|h| h.as_array()).map(|a| !a.is_empty()).unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    if !has_history {
+        return vec![];
+    }
+    vec![json!({
+        "type": "function",
+        "function": {
+            "name": "getSurfaceHistory",
+            "description": "Return a surface's saved state timeline (the prior rendered views, oldest→newest). Each entry has { seq, ts, trigger, components }. Use this to study what was shown before — e.g. when the user navigates back, fetch the history and re-render an earlier entry's components.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "surfaceId": { "type": "string", "description": "Which surface's history to fetch." },
+                    "limit": { "type": "integer", "description": "Max most-recent entries to return (default 10)." }
+                },
+                "required": ["surfaceId"]
+            }
+        }
+    })]
+}
+
+/// Resolve the getSurfaceHistory built-in tool against the turn context.
+fn get_surface_history(ctx: &Value, args: &Value) -> ToolOutcome {
+    let sid = args.get("surfaceId").and_then(|s| s.as_str()).unwrap_or("");
+    let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10) as usize;
+    let entries = ctx
+        .get("surfaces")
+        .and_then(|s| s.get(sid))
+        .and_then(|s| s.get("history"))
+        .and_then(|h| h.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let n = entries.len();
+    let recent: Vec<Value> = entries.into_iter().skip(n.saturating_sub(limit)).collect();
+    let text = serde_json::to_string(&json!({ "surfaceId": sid, "count": recent.len(), "history": recent }))
+        .unwrap_or_else(|_| "{}".to_string());
+    ToolOutcome { text, is_error: false, ui: vec![] }
 }
 
 async fn run_with_correction(
@@ -348,11 +409,7 @@ pub(crate) fn process_emissions(emissions: &[Value], ctx: &Value) -> ProcessResu
             let processed: Vec<Value> =
                 a2ui_msgs.iter().map(|m| inject_surface_id(m, &target_id)).collect();
             issues.extend(validate_component_references(&processed));
-            let mut a2ui = json!({ "kind": "a2ui", "targetSurfaceId": target_id, "messages": processed });
-            // Carry the history flag through to the client (Widget Manager Back support).
-            if em.get("pushHistory").and_then(|b| b.as_bool()).unwrap_or(false) {
-                a2ui["pushHistory"] = json!(true);
-            }
+            let a2ui = json!({ "kind": "a2ui", "targetSurfaceId": target_id, "messages": processed });
             validated.push(a2ui);
 
             if !is_placeholder && !has_create && known_surfaces.contains(declared) {

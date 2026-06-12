@@ -29,7 +29,9 @@ import { primeReactCatalog, componentAgentHints } from '@arete-desktop/adapter-p
 import { streamAgent, streamWidgetAction } from './agui-client';
 import { WidgetManager } from './widget-manager';
 import { runClientHandler } from './widget-client';
-import type { WidgetHandler } from './persistence';
+import type { WidgetHandler, TimelineEntry } from './persistence';
+
+const MAX_TIMELINE_PER_SURFACE = 25;
 import {
   loadPages,
   createPage,
@@ -110,8 +112,16 @@ export function App() {
 
   const pinnedSurfaceIdsRef = useRef<Set<string>>(new Set());
   const surfaceContentsRef = useRef<Record<string, unknown[]>>({});
-  // Per-surface history of prior component states, for Widget Manager Back.
-  const surfaceHistoryRef = useRef<Record<string, unknown[][]>>({});
+  // Generic per-surface, globally-ordered state timeline — every render of a
+  // surface is appended here (NOT a back-specific stack). Exposed to handlers as
+  // `surface.history` and to the LLM via the getSurfaceHistory tool, so either can
+  // study prior states and restore/derive from them. `seq` orders entries across
+  // all surfaces; capped per surface to bound memory + payload.
+  const surfaceTimelineRef = useRef<Record<string, TimelineEntry[]>>({});
+  const timelineSeqRef = useRef(0);
+  // Assigned after recordTimeline is defined; lets handlePrompt (defined earlier)
+  // append agent-driven renders to the timeline.
+  const recordTimelineRef = useRef<(surfaceId: string, trigger: string) => void>(() => {});
   const recentSurfaceIdsRef = useRef<string[]>([]);
   const handlePromptRef = useRef<(text: string, fromUserAction?: boolean) => void | Promise<void>>(() => {});
 
@@ -392,6 +402,11 @@ export function App() {
           liveProcessor.processMessages(msgs as never);
           surfaceContentsRef.current[s.surfaceId] = s.components;
           widgetManager.loadSurface(s.surfaceId, s.handlers);
+          if (Array.isArray(s.history) && s.history.length) {
+            surfaceTimelineRef.current[s.surfaceId] = s.history;
+            const maxSeq = s.history.reduce((m, e) => Math.max(m, e.seq ?? 0), 0);
+            if (maxSeq > timelineSeqRef.current) timelineSeqRef.current = maxSeq;
+          }
         } catch {
           /* skip malformed persisted surface */
         }
@@ -477,6 +492,7 @@ export function App() {
           dataModel,
           updatedAt: Date.now(),
           handlers: widgetManager.forSurface(surfaceId),
+          history: surfaceTimelineRef.current[surfaceId] ?? [],
         };
       });
       saveSurfaces(recs).catch(() => {});
@@ -504,7 +520,11 @@ export function App() {
           /* ignore */
         }
         const region = activeMapping[sid];
-        surfacesPayload[sid] = { components, dataModel, visibleOnActivePage: region != null, region };
+        // Last few timeline entries so the LLM's getSurfaceHistory tool can study
+        // recent prior states without bloating the request with the full history.
+        const tl = surfaceTimelineRef.current[sid] ?? [];
+        const history = tl.slice(-8);
+        surfacesPayload[sid] = { components, dataModel, visibleOnActivePage: region != null, region, history };
       }
 
       const pagesCtx: Record<string, { layout: LayoutDescriptor; mapping: Record<string, string> }> = {};
@@ -571,6 +591,11 @@ export function App() {
               // User-action edits apply straight to live even if the target surface is
               // gated (e.g. pinned) — those changes are the user's own doing.
               router.route(messages as never, { bypassGate: fromUserAction });
+              // Record the agent-driven state in the generic timeline. Gated diffs
+              // are recorded only once approved (router ticks), so skip while gated.
+              if (targetId && !(diffsGated && isModification && !fromUserAction)) {
+                recordTimelineRef.current(targetId, fromUserAction ? 'user-action' : 'agent');
+              }
               chatStore.push({ role: 'agent', surfaceId: targetId });
             } else if (emission.kind === 'pageOp') {
               const op = emission.op as { name?: string; pageId?: string; title?: string; icon?: string; color?: string; layout?: LayoutDescriptor };
@@ -644,27 +669,63 @@ export function App() {
     handlePromptRef.current = handlePrompt;
   }, [handlePrompt]);
 
-  // --- Widget Manager surface helpers (apply / history) ---
+  // --- Generic surface-state timeline ---------------------------------------
+  // Append the current state of `surfaceId` to its timeline. Called after a render
+  // is applied (any source: agent, user-action, handler, restore). `trigger` is a
+  // human/LLM-readable label. The latest entry == the surface's current view.
+  const recordTimeline = useCallback(
+    (surfaceId: string, trigger: string) => {
+      const components = surfaceContentsRef.current[surfaceId];
+      if (!components) return;
+      let dataModel: Record<string, unknown> | undefined;
+      try {
+        const dm = liveProcessor.model.getSurface(surfaceId)?.dataModel?.get('/');
+        if (dm && typeof dm === 'object') dataModel = dm as Record<string, unknown>;
+      } catch {
+        /* ignore */
+      }
+      const entry: TimelineEntry = {
+        seq: ++timelineSeqRef.current,
+        ts: Date.now(),
+        trigger,
+        components: JSON.parse(JSON.stringify(components)) as unknown[],
+        dataModel,
+      };
+      const list = (surfaceTimelineRef.current[surfaceId] ??= []);
+      list.push(entry);
+      if (list.length > MAX_TIMELINE_PER_SURFACE) list.splice(0, list.length - MAX_TIMELINE_PER_SURFACE);
+      bumpPersist();
+    },
+    [liveProcessor, bumpPersist],
+  );
+  recordTimelineRef.current = recordTimeline;
+
+  // Apply a flat component array to a surface (used by handlers / restores) and
+  // record it in the timeline.
   const applyComponents = useCallback(
-    (surfaceId: string, components: unknown[]) => {
+    (surfaceId: string, components: unknown[], trigger: string) => {
       const messages = [{ version: 'v0.9', updateComponents: { surfaceId, components } }];
       captureSurfaceContents(messages);
       router.route(messages as never, { bypassGate: true });
+      recordTimeline(surfaceId, trigger);
     },
-    [captureSurfaceContents, router],
+    [captureSurfaceContents, router, recordTimeline],
   );
-  const pushSurfaceHistory = useCallback((surfaceId: string) => {
-    const cur = surfaceContentsRef.current[surfaceId];
-    if (!cur) return;
-    (surfaceHistoryRef.current[surfaceId] ??= []).push(JSON.parse(JSON.stringify(cur)) as unknown[]);
-  }, []);
-  const restoreSurfaceHistory = useCallback(
-    (surfaceId: string) => {
-      const prev = surfaceHistoryRef.current[surfaceId]?.pop();
-      if (prev) applyComponents(surfaceId, prev);
-    },
-    [applyComponents],
-  );
+
+  // Build the read-only `surface` object handed to a handler sandbox: current
+  // components + dataModel, plus the generic `history` timeline so a handler can
+  // restore/derive from a prior state (e.g. Back = render history[len-2]).
+  const buildSurfacePayload = useCallback((surfaceId: string) => {
+    const components = surfaceContentsRef.current[surfaceId] ?? [];
+    let dataModel: Record<string, unknown> = {};
+    try {
+      const dm = liveProcessor.model.getSurface(surfaceId)?.dataModel?.get('/');
+      if (dm && typeof dm === 'object') dataModel = dm as Record<string, unknown>;
+    } catch {
+      /* ignore */
+    }
+    return { components, dataModel, history: surfaceTimelineRef.current[surfaceId] ?? [] };
+  }, [liveProcessor]);
 
   // Run a surface's server handler script (no LLM) and apply its surface edits.
   // On script failure, fall back to a normal LLM turn so the journey still works.
@@ -672,29 +733,21 @@ export function App() {
     async (action: UserAction, handler: WidgetHandler) => {
       const surfaceId = action.surfaceId;
       if (!surfaceId) return;
-      const components = surfaceContentsRef.current[surfaceId] ?? [];
-      let dataModel: Record<string, unknown> = {};
-      try {
-        const dm = liveProcessor.model.getSurface(surfaceId)?.dataModel?.get('/');
-        if (dm && typeof dm === 'object') dataModel = dm as Record<string, unknown>;
-      } catch {
-        /* ignore */
-      }
-
+      const trigger = `handler:${action.name}`;
       const controller = new AbortController();
       abortControllersRef.current.add(controller);
       setBusyCount((c) => c + 1);
       let errored = false;
       try {
         await streamWidgetAction(
-          { surfaceId, event: action.name, ctx: action.context ?? {}, code: handler.code, surface: { components, dataModel } },
+          { surfaceId, event: action.name, ctx: action.context ?? {}, code: handler.code, surface: buildSurfacePayload(surfaceId) },
           {
             onEmission: (emission) => {
               if (emission.kind === 'a2ui') {
-                if (emission.pushHistory) pushSurfaceHistory(emission.targetSurfaceId);
                 const messages = emission.messages as unknown[];
                 captureSurfaceContents(messages);
                 router.route(messages as never, { bypassGate: true });
+                recordTimeline(emission.targetSurfaceId, trigger);
               }
             },
             onRunError: ({ message }) => {
@@ -717,7 +770,7 @@ export function App() {
         await handlePromptRef.current(buildActionSynth(action, 1), true);
       }
     },
-    [router, chatStore, captureSurfaceContents, liveProcessor, pushSurfaceHistory],
+    [router, chatStore, captureSurfaceContents, buildSurfacePayload, recordTimeline],
   );
 
   // Run a `runtime:"client"` handler in the QuickJS sandbox — instant, no network.
@@ -725,29 +778,20 @@ export function App() {
     async (action: UserAction, handler: WidgetHandler) => {
       const surfaceId = action.surfaceId;
       if (!surfaceId) return;
-      const components = surfaceContentsRef.current[surfaceId] ?? [];
-      let dataModel: Record<string, unknown> = {};
+      const trigger = `handler:${action.name}`;
       try {
-        const dm = liveProcessor.model.getSurface(surfaceId)?.dataModel?.get('/');
-        if (dm && typeof dm === 'object') dataModel = dm as Record<string, unknown>;
-      } catch {
-        /* ignore */
-      }
-      try {
-        await runClientHandler(handler.code, action.context ?? {}, { components, dataModel }, {
-          render: (target, comps, opts) => {
+        await runClientHandler(handler.code, action.context ?? {}, buildSurfacePayload(surfaceId), {
+          render: (target, comps) => {
             const sid = !target || target === 'self' ? surfaceId : target;
-            if (opts && opts.pushHistory) pushSurfaceHistory(sid);
-            applyComponents(sid, comps as unknown[]);
+            applyComponents(sid, comps as unknown[], trigger);
           },
-          back: () => restoreSurfaceHistory(surfaceId),
         });
       } catch (err) {
         chatStore.push({ role: 'system', text: `Widget action failed: ${(err as Error).message}` });
         await handlePromptRef.current(buildActionSynth(action, 1), true);
       }
     },
-    [liveProcessor, applyComponents, pushSurfaceHistory, restoreSurfaceHistory, chatStore],
+    [applyComponents, buildSurfacePayload, chatStore],
   );
 
   // Decide per action: a registered handler (Widget Manager, server or client) or the LLM.

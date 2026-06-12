@@ -12,7 +12,8 @@ const STACK_LIMIT: usize = 512 * 1024; // 512 KB
 const TIME_LIMIT: Duration = Duration::from_secs(20);
 
 /// Run a sandboxed widget handler script. The script gets a curated host API —
-/// `ctx` (the action context), `surface` (current components/dataModel), async
+/// `ctx` (the action context), `surface` (current components/dataModel + the
+/// generic `surface.history` state timeline), async
 /// `tools.<name>(args)` (→ MCP), and `render(target, components, opts)` — and
 /// produces a2ui emissions (collected from `render` calls). NO file/network/system
 /// access beyond the exposed `tools`. Memory/stack/time limited.
@@ -81,6 +82,7 @@ pub async fn run_handler(
         let prelude = r#"
             globalThis.ctx = JSON.parse(__ctx_json);
             globalThis.surface = JSON.parse(__surface_json);
+            if (!globalThis.surface.history) globalThis.surface.history = [];
             globalThis.tools = new Proxy({}, {
                 get: (_t, name) => (args) =>
                     __call_tool(String(name), JSON.stringify(args === undefined ? {} : args))

@@ -19,6 +19,7 @@
     "@arete-desktop/adapter-primereact": "workspace:*",
     "@arete-desktop/agui": "workspace:*",
     "@arete-desktop/core": "workspace:*",
+    "@jitl/quickjs-singlefile-browser-release-sync": "^0.32.0",
     "primeicons": "^7.0.0",
     "primereact": "^10.9.0",
     "quickjs-emscripten": "^0.32.0",

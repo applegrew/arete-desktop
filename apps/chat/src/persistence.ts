@@ -33,6 +33,17 @@ export interface WidgetHandler {
   code: string;
 }
 
+/** One captured state of a surface in its generic timeline (see surfaceTimelineRef). */
+export interface TimelineEntry {
+  /** Monotonic, globally-ordered sequence number across all surfaces. */
+  seq: number;
+  ts: number;
+  /** What produced this state: "agent" | "user-action:<name>" | "handler:<event>" | "restore". */
+  trigger: string;
+  components: unknown[];
+  dataModel?: Record<string, unknown>;
+}
+
 export interface ApiSurface {
   surfaceId: string;
   components: unknown[];
@@ -40,6 +51,8 @@ export interface ApiSurface {
   updatedAt: number;
   /** Agent-authored action handlers keyed by event name. */
   handlers?: Record<string, WidgetHandler>;
+  /** Generic per-surface state timeline (oldest→newest), capped. */
+  history?: TimelineEntry[];
 }
 
 export interface ApiChatEntry {

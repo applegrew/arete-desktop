@@ -1,14 +1,25 @@
-import { getQuickJS, type QuickJSContext } from 'quickjs-emscripten';
+import { newQuickJSWASMModuleFromVariant, type QuickJSContext, type QuickJSWASMModule } from 'quickjs-emscripten';
+import variant from '@jitl/quickjs-singlefile-browser-release-sync';
+
+// Single-file variant: the WASM is inlined as base64 in the JS bundle, so there
+// is NO separate .wasm fetch. The default `getQuickJS()` fetches a .wasm URL,
+// which under vite / the Tauri webview resolves to index.html — yielding
+// "WebAssembly.Module doesn't parse at byte 0". The inlined variant avoids that.
+let modPromise: Promise<QuickJSWASMModule> | null = null;
+function getModule(): Promise<QuickJSWASMModule> {
+  return (modPromise ??= newQuickJSWASMModuleFromVariant(variant));
+}
 
 /**
  * Run a `runtime:"client"` widget handler in a QuickJS (WASM) sandbox — instant,
  * offline, no LLM. Client handlers are SYNCHRONOUS and pure-UI: they get `ctx`,
- * `surface`, `render(target, components, opts)`, and `history.back()`. They CANNOT
- * call tools (those need the server). No DOM/network/timers are exposed.
+ * `surface` (which includes `surface.history` — the generic per-surface state
+ * timeline), and `render(target, components, opts)`. They CANNOT call tools (those
+ * need the server). No DOM/network/timers are exposed. "Back" is not a primitive —
+ * a handler restores a prior view by rendering an entry from `surface.history`.
  */
 export interface ClientHooks {
   render: (target: string, components: unknown, opts: Record<string, unknown>) => void;
-  back: () => void;
 }
 
 export async function runClientHandler(
@@ -17,7 +28,7 @@ export async function runClientHandler(
   surfaceObj: unknown,
   hooks: ClientHooks,
 ): Promise<void> {
-  const QuickJS = await getQuickJS();
+  const QuickJS = await getModule();
   const vm = QuickJS.newContext();
   try {
     setStr(vm, '__ctx_json', JSON.stringify(ctxObj ?? {}));
@@ -32,15 +43,10 @@ export async function runClientHandler(
     vm.setProp(vm.global, '__render', renderFn);
     renderFn.dispose();
 
-    const backFn = vm.newFunction('__back', () => {
-      hooks.back();
-    });
-    vm.setProp(vm.global, '__back', backFn);
-    backFn.dispose();
-
     const prelude = `
       globalThis.ctx = JSON.parse(__ctx_json);
       globalThis.surface = JSON.parse(__surface_json);
+      if (!globalThis.surface.history) globalThis.surface.history = [];
       globalThis.render = function (target, components, opts) {
         __render(
           String(target == null ? 'self' : target),
@@ -48,7 +54,6 @@ export async function runClientHandler(
           JSON.stringify(opts == null ? {} : opts),
         );
       };
-      globalThis.history = { back: function () { __back(); } };
     `;
     evalOrThrow(vm, prelude);
     // Synchronous body — client handlers don't await (no async host fns).

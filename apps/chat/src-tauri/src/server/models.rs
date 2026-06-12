@@ -41,6 +41,9 @@ pub struct ApiSurface {
     /// Agent-authored widget action handlers: `{ [event]: { runtime, code } }`.
     #[serde(default = "empty_object")]
     pub handlers: Value,
+    /// Generic per-surface state timeline: `[{ seq, ts, trigger, components, dataModel? }]`.
+    #[serde(default = "empty_array")]
+    pub history: Value,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
