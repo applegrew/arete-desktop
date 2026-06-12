@@ -48,7 +48,9 @@ const overlay: React.CSSProperties = {
 const panel: React.CSSProperties = {
   width: 'min(560px, 92vw)',
   maxHeight: '84vh',
-  overflowY: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
   background: 'linear-gradient(180deg, rgba(28,30,54,0.78), rgba(14,15,32,0.82))',
   backdropFilter: 'var(--blur-strong)',
   WebkitBackdropFilter: 'var(--blur-strong)',
@@ -229,15 +231,20 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
   return (
     <div style={overlay} onClick={onClose}>
       <div style={panel} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-          <strong style={{ fontSize: 17, fontFamily: 'var(--font-display)', letterSpacing: -0.2 }}>Settings</strong>
-          <div style={{ flex: 1 }} />
-          <button type="button" style={btn} onClick={onClose} aria-label="Close settings">
-            ✕
-          </button>
+        {/* Fixed header — frozen above the scroll region. */}
+        <div style={{ flex: '0 0 auto', borderBottom: '1px solid var(--hairline)', paddingBottom: 14, marginBottom: 2 }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+            <strong style={{ fontSize: 17, fontFamily: 'var(--font-display)', letterSpacing: -0.2 }}>Settings</strong>
+            <div style={{ flex: 1 }} />
+            <button type="button" style={btn} onClick={onClose} aria-label="Close settings">
+              ✕
+            </button>
+          </div>
+          <div style={{ fontSize: 12, color: '#777' }}>Model &amp; MCP changes apply to the next agent turn — no restart.</div>
         </div>
-        <div style={{ fontSize: 12, color: '#777' }}>Model &amp; MCP changes apply to the next agent turn — no restart.</div>
 
+        {/* Scrollable body */}
+        <div style={{ flex: '1 1 auto', overflowY: 'auto', minHeight: 0 }}>
         {/* Model & agent */}
         <div style={sectionTitle}>Model &amp; agent</div>
         <label style={label}>Model</label>
@@ -471,9 +478,10 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
           <input type="checkbox" checked={draft.gateDiffs} onChange={(e) => set({ gateDiffs: e.target.checked })} />
           Gate agent diffs (approve / reject before live state changes)
         </label>
+        </div>
 
-        {/* Footer */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
+        {/* Fixed footer — frozen below the scroll region. */}
+        <div style={{ flex: '0 0 auto', display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 16, marginTop: 8, borderTop: '1px solid var(--hairline)' }}>
           <button type="button" style={btn} onClick={onClose}>
             Cancel
           </button>
