@@ -144,7 +144,15 @@ async fn connect_http(entry: &Value) -> Result<(ClientService, Vec<Value>), Stri
                 None => continue,
             };
             if k.eq_ignore_ascii_case("authorization") {
-                config.auth_header = Some(val.to_string());
+                // rmcp prepends "Bearer " to `auth_header`, so store the BARE token
+                // — otherwise the server receives "Bearer Bearer <token>" → invalid.
+                let v = val.trim();
+                let token = if v.len() >= 7 && v[..7].eq_ignore_ascii_case("bearer ") {
+                    v[7..].trim_start()
+                } else {
+                    v
+                };
+                config.auth_header = Some(token.to_string());
             } else if let (Ok(name), Ok(value)) =
                 (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(val))
             {
