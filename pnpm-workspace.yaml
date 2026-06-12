@@ -1,6 +1,3 @@
 packages:
   - "packages/*"
-  - "examples/*"
-  - "examples/erp-sandbox/server"
   - "apps/*"
-  - "apps/chat/server"

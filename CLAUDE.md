@@ -96,3 +96,20 @@ When implementing, verify these in order:
 8. `pinSurface`: preview in target region → approve promotes from chat to page; reject leaves untouched
 9. `setPageLayout` with 3×3 grid descriptor: preview → approve commits; reject leaves untouched
 10. Harness JSON schemas published; wrapping into an ADK toolset is mechanical from schema alone
+
+## Tauri Desktop App (`apps/chat/src-tauri`)
+
+The `arete-chat` app ships as a Tauri v2 desktop app. The Rust process embeds an
+**axum** HTTP server on `127.0.0.1:8787` that mirrors the old Node backend's `/api`
+contract byte-for-byte, so the React frontend is unchanged. Persistence is `rusqlite`
+(bundled) in the per-OS app-data dir. Run with `pnpm tauri:dev` (or `pnpm dev` from root).
+
+### Build gotcha: pin `time` to 0.3.47
+
+**`time 0.3.48` does not compile** with bleeding-edge rustc (e.g. Homebrew rustc 1.96):
+it adds an impl that collides with `cookie 0.18.1`'s blanket `From` impl under stricter
+coherence, producing an E0119 error in `cookie` (`cookie`/`time` are unavoidable — pulled
+in by `tauri`/`wry` for the webview's cookie store). The fix is **not** a toolchain change:
+pin `time` to **0.3.47** (`cargo update -p time --precise 0.3.47`), which is committed in
+`Cargo.lock`. This is *not* the classic edition-2024 issue — we're already `edition = "2021"`,
+and a dependency's edition is independent of ours, so changing our edition can't affect it.
