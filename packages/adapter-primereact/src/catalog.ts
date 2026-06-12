@@ -12,8 +12,9 @@ import { CheckBox } from './components/CheckBox';
 import { Chart, ChartApi } from './components/Chart';
 import { Embed, EmbedApi } from './components/Embed';
 import { DataTable, DataTableApi } from './components/DataTable';
+import { Form, FormApi } from './components/Form';
 
-export { Text, Image, Card, Row, Column, Button, Divider, TextField, CheckBox, Chart, ChartApi, Embed, EmbedApi, DataTable, DataTableApi };
+export { Text, Image, Card, Row, Column, Button, Divider, TextField, CheckBox, Chart, ChartApi, Embed, EmbedApi, DataTable, DataTableApi, Form, FormApi };
 
 const COMPONENT_LIST: ReactComponentImplementation[] = [
   Text,
@@ -28,6 +29,7 @@ const COMPONENT_LIST: ReactComponentImplementation[] = [
   Chart,
   Embed,
   DataTable,
+  Form,
 ];
 
 export const primeReactCatalog = new Catalog<ReactComponentImplementation>(
@@ -52,4 +54,6 @@ export const componentAgentHints: Record<string, string> = {
     'the canonical primitive for ANY tabular data or list of records (tickets, invoices, users…). Provide `columns` ([{field, header}]) and `data` (array of row objects keyed by each column `field`). Set `rowsPerPage` for built-in pagination — do NOT build your own pager with buttons. Columns sort by default. Set `action` to make rows clickable (auto-context {row, index}). For large datasets use lazy paging: `lazy:true` + `totalRecords` + `rowsPerPage` + `first` + `pageAction`, with only the current page in `data`; on the pageAction, update the same surface with the next page. Prefer this over Rows/Columns of Text or emoji for any grid/list of data.',
   Embed:
     'a sandboxed iframe the FRAMEWORK creates to render MCP-UI tool resources (HTML/URL). Do NOT emit Embed components yourself; they appear automatically when an MCP tool returns UI. You may reference an existing one if the user asks about it.',
+  Form:
+    'self-contained form for showing OR collecting a record\'s fields. Provide `fields` ([{name, label?, type?, value?, options?}]). Two variants via `readOnly`: set readOnly:true to DISPLAY a record (label/value pairs, no inputs) — use for "show details of X"; leave it false (default) for an EDITABLE form (create/edit) and set `action` + a submit button appears. On submit the auto-context is `{ values }` (each field name → current value), reported back to you on the next turn. Field `type`: text | number | longText | obscured | checkbox | select (with `options`: ["a","b"] or [{label,value}]). Prefer Form over hand-built Rows of TextFields for any "form", "edit", "create", or single-record detail view.',
 };
