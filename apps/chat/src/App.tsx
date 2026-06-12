@@ -28,6 +28,7 @@ import {
 import { primeReactCatalog, componentAgentHints } from '@arete-desktop/adapter-primereact';
 import { streamAgent, streamWidgetAction } from './agui-client';
 import { WidgetManager } from './widget-manager';
+import { runClientHandler } from './widget-client';
 import type { WidgetHandler } from './persistence';
 import {
   loadPages,
@@ -109,6 +110,8 @@ export function App() {
 
   const pinnedSurfaceIdsRef = useRef<Set<string>>(new Set());
   const surfaceContentsRef = useRef<Record<string, unknown[]>>({});
+  // Per-surface history of prior component states, for Widget Manager Back.
+  const surfaceHistoryRef = useRef<Record<string, unknown[][]>>({});
   const recentSurfaceIdsRef = useRef<string[]>([]);
   const handlePromptRef = useRef<(text: string, fromUserAction?: boolean) => void | Promise<void>>(() => {});
 
@@ -641,6 +644,28 @@ export function App() {
     handlePromptRef.current = handlePrompt;
   }, [handlePrompt]);
 
+  // --- Widget Manager surface helpers (apply / history) ---
+  const applyComponents = useCallback(
+    (surfaceId: string, components: unknown[]) => {
+      const messages = [{ version: 'v0.9', updateComponents: { surfaceId, components } }];
+      captureSurfaceContents(messages);
+      router.route(messages as never, { bypassGate: true });
+    },
+    [captureSurfaceContents, router],
+  );
+  const pushSurfaceHistory = useCallback((surfaceId: string) => {
+    const cur = surfaceContentsRef.current[surfaceId];
+    if (!cur) return;
+    (surfaceHistoryRef.current[surfaceId] ??= []).push(JSON.parse(JSON.stringify(cur)) as unknown[]);
+  }, []);
+  const restoreSurfaceHistory = useCallback(
+    (surfaceId: string) => {
+      const prev = surfaceHistoryRef.current[surfaceId]?.pop();
+      if (prev) applyComponents(surfaceId, prev);
+    },
+    [applyComponents],
+  );
+
   // Run a surface's server handler script (no LLM) and apply its surface edits.
   // On script failure, fall back to a normal LLM turn so the journey still works.
   const runWidgetAction = useCallback(
@@ -666,6 +691,7 @@ export function App() {
           {
             onEmission: (emission) => {
               if (emission.kind === 'a2ui') {
+                if (emission.pushHistory) pushSurfaceHistory(emission.targetSurfaceId);
                 const messages = emission.messages as unknown[];
                 captureSurfaceContents(messages);
                 router.route(messages as never, { bypassGate: true });
@@ -691,13 +717,44 @@ export function App() {
         await handlePromptRef.current(buildActionSynth(action, 1), true);
       }
     },
-    [router, chatStore, captureSurfaceContents, liveProcessor],
+    [router, chatStore, captureSurfaceContents, liveProcessor, pushSurfaceHistory],
   );
 
-  // Decide per action: a registered server handler (Widget Manager) or the LLM.
+  // Run a `runtime:"client"` handler in the QuickJS sandbox — instant, no network.
+  const runClientWidget = useCallback(
+    async (action: UserAction, handler: WidgetHandler) => {
+      const surfaceId = action.surfaceId;
+      if (!surfaceId) return;
+      const components = surfaceContentsRef.current[surfaceId] ?? [];
+      let dataModel: Record<string, unknown> = {};
+      try {
+        const dm = liveProcessor.model.getSurface(surfaceId)?.dataModel?.get('/');
+        if (dm && typeof dm === 'object') dataModel = dm as Record<string, unknown>;
+      } catch {
+        /* ignore */
+      }
+      try {
+        await runClientHandler(handler.code, action.context ?? {}, { components, dataModel }, {
+          render: (target, comps, opts) => {
+            const sid = !target || target === 'self' ? surfaceId : target;
+            if (opts && opts.pushHistory) pushSurfaceHistory(sid);
+            applyComponents(sid, comps as unknown[]);
+          },
+          back: () => restoreSurfaceHistory(surfaceId),
+        });
+      } catch (err) {
+        chatStore.push({ role: 'system', text: `Widget action failed: ${(err as Error).message}` });
+        await handlePromptRef.current(buildActionSynth(action, 1), true);
+      }
+    },
+    [liveProcessor, applyComponents, pushSurfaceHistory, restoreSurfaceHistory, chatStore],
+  );
+
+  // Decide per action: a registered handler (Widget Manager, server or client) or the LLM.
   dispatchActionRef.current = (item) => {
     const h = widgetManager.handlerFor(item.action.surfaceId, item.action.name);
     if (h && h.runtime === 'server') return runWidgetAction(item.action, h);
+    if (h && h.runtime === 'client') return runClientWidget(item.action, h);
     return Promise.resolve(handlePromptRef.current(buildActionSynth(item.action, item.repeatCount), true));
   };
 

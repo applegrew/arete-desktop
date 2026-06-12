@@ -96,15 +96,22 @@ Routing every click back to you is slow and costly. When you handle a [USER ACTI
 Emission shape:
 {"kind":"widgetScript","targetSurfaceId":"<the surface's id or \"<PLACEHOLDER>\" if created this turn>","event":"<the action event name, e.g. viewTicketDetail>","runtime":"server","code":"<JavaScript>"}
 
-The JS runs in a sandbox with this host API (server runtime — it CAN call tools):
+Two runtimes:
+- `runtime:"server"` — for handlers that need DATA. Async; CAN call tools. Host API: `ctx`, `surface`, `tools.<name>(args)` (await → the tool's result, parsed JSON or text), `render(target, components, opts)`.
+- `runtime:"client"` — for PURE-UI handlers (Back, switching an already-loaded view). SYNCHRONOUS; runs instantly with NO network. Host API: `ctx`, `surface`, `render(...)`, and `history.back()`. NO tools.
+
+Shared host API:
 - `ctx` — the action's context (same payload you'd get in the [USER ACTION]; e.g. a row click → ctx.row, ctx.index; pagination → ctx.first, ctx.rows).
 - `surface` — the current surface: surface.components (array) and surface.dataModel.
-- `tools.<name>(args)` — async; `await tools.fetchTicket({id: ctx.row.id})` returns the tool's result (parsed JSON if it is JSON, else text).
-- `render(target, components, opts)` — replace a surface's components. Use target "self" for this surface. `components` is the SAME flat A2UI component array you'd emit (root id="root", etc.). Pass `{pushHistory:true}` if a Back should be able to return here.
-Only `runtime:"server"` is supported today (handlers that fetch data / call tools). Keep the script small and deterministic; it must not depend on anything outside the host API.
+- `render(target, components, opts)` — replace a surface's components. target "self" = this surface. `components` is the SAME flat A2UI array you'd emit (root id="root", …). Pass `{pushHistory:true}` to snapshot the current view first, so a later `history.back()` can return to it.
+- `history.back()` (client only) — restore the previous snapshot (instant Back).
+Keep scripts small and deterministic; they must use only this host API.
 
-Example — first time a ticket row is clicked you render the detail (as usual) AND attach a handler so future clicks skip you:
-{"kind":"widgetScript","targetSurfaceId":"<PLACEHOLDER>","event":"viewTicketDetail","runtime":"server","code":"const t = await tools.fetchTicket({ id: ctx.row.id }); render('self', [ { id:'root', component:'Form', readOnly:true, title:'Ticket', fields:[ {name:'id', label:'ID', value: ctx.row.id}, {name:'subject', label:'Subject', value: (t && t.subject) || ctx.row.subject}, {name:'status', label:'Status', value: (t && t.status) || ''} ] } ], { pushHistory: true });"}
+PATTERN for master→detail with Back: attach a `runtime:"server"` handler for the row event that fetches + renders the detail with `{pushHistory:true}` AND a `runtime:"client"` handler for the Back button's event that calls `history.back()`. Then the detail's Back button works instantly with no LLM and no server call.
+
+Example handlers (emit BOTH the first time a ticket row is clicked, alongside the detail render):
+{"kind":"widgetScript","targetSurfaceId":"<PLACEHOLDER>","event":"viewTicketDetail","runtime":"server","code":"const t = await tools.fetchTicket({ id: ctx.row.id }); render('self', [ { id:'root', component:'Column', children:['form','back'] }, { id:'form', component:'Form', readOnly:true, title:'Ticket', fields:[ {name:'subject', label:'Subject', value: (t && t.subject) || ctx.row.subject}, {name:'status', label:'Status', value: (t && t.status) || ''} ] }, { id:'back', component:'Button', label:'Back', action:{event:{name:'back'}} } ], { pushHistory: true });"}
+{"kind":"widgetScript","targetSurfaceId":"<PLACEHOLDER>","event":"back","runtime":"client","code":"history.back();"}
 
 Response has THREE channels:
 - "reply"     — the visible conversational text addressed to the user. Required if the user asked a question or sent a greeting.

@@ -348,7 +348,12 @@ pub(crate) fn process_emissions(emissions: &[Value], ctx: &Value) -> ProcessResu
             let processed: Vec<Value> =
                 a2ui_msgs.iter().map(|m| inject_surface_id(m, &target_id)).collect();
             issues.extend(validate_component_references(&processed));
-            validated.push(json!({ "kind": "a2ui", "targetSurfaceId": target_id, "messages": processed }));
+            let mut a2ui = json!({ "kind": "a2ui", "targetSurfaceId": target_id, "messages": processed });
+            // Carry the history flag through to the client (Widget Manager Back support).
+            if em.get("pushHistory").and_then(|b| b.as_bool()).unwrap_or(false) {
+                a2ui["pushHistory"] = json!(true);
+            }
+            validated.push(a2ui);
 
             if !is_placeholder && !has_create && known_surfaces.contains(declared) {
                 let live = ctx
