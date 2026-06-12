@@ -478,7 +478,9 @@ export function App() {
               const isModification = isExisting && !hasCreate;
               if (diffsGated && isModification && !fromUserAction) router.gateSurface(targetId);
               captureSurfaceContents(messages);
-              router.route(messages as never);
+              // User-action edits apply straight to live even if the target surface is
+              // gated (e.g. pinned) — those changes are the user's own doing.
+              router.route(messages as never, { bypassGate: fromUserAction });
               chatStore.push({ role: 'agent', surfaceId: targetId });
             } else if (emission.kind === 'pageOp') {
               const op = emission.op as { name?: string; pageId?: string; title?: string; icon?: string; color?: string; layout?: LayoutDescriptor };
@@ -497,7 +499,8 @@ export function App() {
                 if (op.color !== undefined) patch.color = op.color;
                 if (Object.keys(patch).length) updatePageLocal(op.pageId, patch);
               } else {
-                harness.apply(op as never);
+                // User-action page ops auto-apply (no approval gate), matching content edits.
+                harness.apply(op as never, { autoApprove: fromUserAction });
               }
             }
           },

@@ -116,7 +116,7 @@ export class DiffRouter {
    * whether its surfaceId is in the gated set. After routing, recomputes the diff
    * for every surface that received shadow messages.
    */
-  route(messages: A2uiMessage[]): void {
+  route(messages: A2uiMessage[], opts?: { bypassGate?: boolean }): void {
     const filtered = this.hooks.onBeforeApply
       ? this.hooks.onBeforeApply(messages, {})
       : messages;
@@ -127,7 +127,9 @@ export class DiffRouter {
 
     for (const msg of filtered) {
       const sid = surfaceIdOf(msg);
-      if (sid && this.gated.has(sid)) {
+      // `bypassGate` (user-action-driven edits) applies straight to live even for
+      // surfaces in the gated set — those changes are the user's own doing.
+      if (!opts?.bypassGate && sid && this.gated.has(sid)) {
         const list = shadowBatchBySurface.get(sid) ?? [];
         list.push(msg);
         shadowBatchBySurface.set(sid, list);

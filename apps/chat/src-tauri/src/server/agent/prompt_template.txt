@@ -7,7 +7,7 @@ Available components (arete-desktop PrimeReact catalog):
 - Card: { id, component:"Card", child:"<childId>" }
 - Column: { id, component:"Column", children:["<id>",...] }
 - Row: { id, component:"Row", children:["<id>",...] }
-- Button: { id, component:"Button", child:"<childId>", action:{event:{name:"click"}} }
+- Button: { id, component:"Button", label:"Click me", action:{event:{name:"click"}} }  (label is the text; use child:"<childId>" only to render a custom component instead of text)
 - Image: { id, component:"Image", url:"...", fit?:"contain"|"cover"|"fill"|"none"|"scaleDown" }
 - Divider: { id, component:"Divider", axis?:"horizontal"|"vertical" }
 - TextField: { id, component:"TextField", label:"...", value?:"...", variant?:"longText"|"number"|"shortText"|"obscured" }

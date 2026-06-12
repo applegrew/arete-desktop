@@ -13,6 +13,8 @@ const actionSchema = z.object({
 
 const buttonSchema = z.object({
   variant: z.enum(['primary', 'secondary', 'borderless']).optional(),
+  /** Text label (the common case). Use `child` to render a custom component instead. */
+  label: z.string().optional(),
   child: z.string().optional(),
   isValid: z.boolean().optional(),
   weight: z.number().optional(),
@@ -29,9 +31,11 @@ export const Button = createComponentImplementation(ButtonApi, ({ props, buildCh
   const dispatchAction = useAction({ sourceComponentId: context.componentModel.id });
   const action = props.action;
 
+  // Prefer an explicit `child` component; otherwise fall back to the `label` text.
+  const childContent = props.child ? buildChild(props.child) : null;
   return (
     <PrimeButton
-      label=""
+      label={childContent ? undefined : (props.label ?? '')}
       severity={props.variant === 'primary' ? 'info' : undefined}
       text={props.variant === 'borderless'}
       onClick={() => {
@@ -48,7 +52,7 @@ export const Button = createComponentImplementation(ButtonApi, ({ props, buildCh
           : {}),
       }}
     >
-      {props.child ? buildChild(props.child) : null}
+      {childContent}
     </PrimeButton>
   );
 });

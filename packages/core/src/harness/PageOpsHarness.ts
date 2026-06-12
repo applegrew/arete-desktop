@@ -97,7 +97,7 @@ export class PageOpsHarness {
     };
   }
 
-  apply(op: PageOp): void {
+  apply(op: PageOp, opts?: { autoApprove?: boolean }): void {
     const filtered = this.hooks.onPageOp ? this.hooks.onPageOp(op, { pageId: targetPageId(op) ?? '' }) : op;
     if (!filtered) return;
 
@@ -123,15 +123,16 @@ export class PageOpsHarness {
       }
       throw new Error(`No page registered with id "${pageId}"`);
     }
-    this.applyToRegistration(filtered, pageId, reg);
+    this.applyToRegistration(filtered, pageId, reg, opts?.autoApprove === true);
   }
 
-  private applyToRegistration(op: PageOp, pageId: string, reg: PageRegistration): void {
+  private applyToRegistration(op: PageOp, pageId: string, reg: PageRegistration, forceAutoApprove = false): void {
+    const autoApprove = forceAutoApprove || reg.autoApprove;
     // Compose a turn's ops: each op applies onto the prior PENDING state (not the
     // committed state) so dependent ops work — e.g. setPageRegion into a region
     // that a preceding setPageLayout in the same turn just created. Without this
     // the later op would compute against the old layout and be dropped.
-    const existing = reg.autoApprove ? undefined : this.pending.get(pageId);
+    const existing = autoApprove ? undefined : this.pending.get(pageId);
     const from = existing ? existing.next : reg.getState();
     let next: { layout: LayoutDescriptor; mapping: PageMapping };
     try {
@@ -146,7 +147,7 @@ export class PageOpsHarness {
       return;
     }
 
-    if (reg.autoApprove) {
+    if (autoApprove) {
       reg.setState(next);
       this.hooks.onApprove?.({ kind: 'page-op', pageId, op, ops: [op], prev: from, next });
       return;
