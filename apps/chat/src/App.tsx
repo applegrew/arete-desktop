@@ -125,9 +125,10 @@ export function App() {
   // append agent-driven renders to the timeline.
   const recordTimelineRef = useRef<(surfaceId: string, trigger: string) => void>(() => {});
   const recentSurfaceIdsRef = useRef<string[]>([]);
-  // Page-op failures (e.g. pinSurface into a layout with no regions). Buffered here,
-  // drained into the NEXT agent turn's diagnostics so the agent gets accurate
-  // feedback (like a tool error) and can correct — page ops never fail silently.
+  // Deferred agent feedback: failures that happen OUTSIDE an agent turn — page-op
+  // failures (e.g. pinSurface with no region) and widget-handler runtime errors.
+  // Buffered here, drained into the NEXT turn's diagnostics so the agent gets
+  // accurate feedback (like a tool error) and can correct — never failing silently.
   const pageOpErrorsRef = useRef<RenderDiagnostic[]>([]);
   const handlePromptRef = useRef<(text: string, fromUserAction?: boolean) => void | Promise<void>>(() => {});
 
@@ -804,7 +805,17 @@ export function App() {
         });
       } catch (err) {
         if (!controller.signal.aborted) {
-          chatStore.push({ role: 'system', text: `Widget action failed: ${(err as Error).message}` });
+          const msg = (err as Error).message;
+          chatStore.push({ role: 'system', text: `Widget action failed: ${msg}` });
+          // Feed the runtime failure back to the agent so the fallback turn can
+          // re-emit a CORRECTED handler (e.g. the tool args were wrong — cursor-based
+          // tools need the cursor token from a prior response, not a row offset).
+          pageOpErrorsRef.current.push({
+            surfaceId,
+            severity: 'error',
+            code: `widget.${action.name}.failed`,
+            message: `The attached "${action.name}" handler failed at runtime: ${msg}. Tool arguments must match the tool's input schema. Handle this action now AND re-emit a corrected widgetScript handler for "${action.name}" so it works next time.`,
+          });
           await handlePromptRef.current(buildActionSynth(action, 1), true);
         }
       } finally {
