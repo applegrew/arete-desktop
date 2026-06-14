@@ -577,11 +577,21 @@ export function App() {
             clearAsking();
             if (emission.kind === 'a2ui') {
               const targetId = emission.targetSurfaceId;
-              const messages = emission.messages as unknown[];
+              let messages = emission.messages as unknown[];
               const hasCreate = messages.some((m) => !!m && typeof m === 'object' && 'createSurface' in (m as object));
               const isExisting =
                 !!targetId &&
                 (surfaceContentsRef.current[targetId] !== undefined || liveProcessor.model.getSurface(targetId) != null);
+              // Robustness: a brand-new surface needs a createSurface before its
+              // updateComponents, or the processor has nothing to render (the surface
+              // renders empty — "where's the widget?"). Local models sometimes emit
+              // updateComponents-only to a new id; synthesize the createSurface here.
+              if (targetId && !isExisting && !hasCreate) {
+                messages = [
+                  { version: 'v0.9', createSurface: { surfaceId: targetId, catalogId, sendDataModel: true } },
+                  ...messages,
+                ];
+              }
               // Gate only MODIFICATIONS to an existing surface, and only when NOT
               // triggered by a user action (those apply directly). Brand-new
               // surfaces (createSurface) render straight into the chat scroll.
@@ -669,6 +679,7 @@ export function App() {
       deletePageLocal,
       shellState.activeTabId,
       widgetManager,
+      catalogId,
     ],
   );
 
