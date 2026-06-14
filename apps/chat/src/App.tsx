@@ -1084,9 +1084,22 @@ export function App() {
     return ws;
   }, []);
 
+  // Bootstrap: load workspaces, and AUTO-CREATE a first one if none exist (e.g. a
+  // brand-new install) so the app always has a workspace to open.
   useEffect(() => {
-    refresh().catch(() => {});
-  }, [refresh]);
+    (async () => {
+      let { workspaces: ws, activeWorkspaceId: active } = await loadWorkspaces();
+      if (ws.length === 0) {
+        const w = await createWorkspace('Workspace 1').catch(() => null);
+        if (w) {
+          ws = [w];
+          active = w.id;
+        }
+      }
+      setWorkspaces(ws);
+      setActiveWorkspaceId(active ?? ws[0]?.id ?? null);
+    })().catch(() => {});
+  }, []);
 
   const switchWorkspace = useCallback((id: string) => {
     setActiveWorkspaceId(id); // instant remount

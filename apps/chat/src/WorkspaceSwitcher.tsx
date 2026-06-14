@@ -35,7 +35,6 @@ export function WorkspaceSwitcher({
 }: WorkspaceSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState('');
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +45,6 @@ export function WorkspaceSwitcher({
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
         setOpen(false);
         setEditingId(null);
-        setCreating(false);
       }
     };
     document.addEventListener('mousedown', onDoc);
@@ -57,18 +55,16 @@ export function WorkspaceSwitcher({
   const startRename = (w: ApiWorkspace) => {
     setEditingId(w.id);
     setDraft(w.name);
-    setCreating(false);
   };
   const commitRename = () => {
     const name = draft.trim();
     if (editingId && name) onRename(editingId, name);
     setEditingId(null);
   };
-  const commitCreate = () => {
-    const name = draft.trim();
-    if (name) onCreate(name);
-    setCreating(false);
-    setDraft('');
+  const createWorkspace = () => {
+    // One click → create immediately with a default name (rename via ✎). A two-step
+    // inline input was easy to miss / lose focus before typing.
+    onCreate(`Workspace ${workspaces.length + 1}`);
     setOpen(false);
   };
 
@@ -196,55 +192,24 @@ export function WorkspaceSwitcher({
 
           <div style={{ height: 1, background: 'var(--glass-border, rgba(255,255,255,0.1))', margin: '6px 4px' }} />
 
-          {creating ? (
-            <input
-              autoFocus
-              value={draft}
-              placeholder="New workspace name"
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitCreate();
-                if (e.key === 'Escape') {
-                  setCreating(false);
-                  setDraft('');
-                }
-              }}
-              onBlur={commitCreate}
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid var(--accent, #7c83ff)',
-                borderRadius: 6,
-                color: 'var(--text, #e5e7eb)',
-                fontSize: 13,
-                padding: '6px 8px',
-              }}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setCreating(true);
-                setDraft('');
-                setEditingId(null);
-              }}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--accent, #7c83ff)',
-                cursor: 'pointer',
-                fontSize: 13,
-                fontWeight: 600,
-                padding: '6px 8px',
-                borderRadius: 6,
-              }}
-            >
-              + New workspace
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={createWorkspace}
+            style={{
+              width: '100%',
+              textAlign: 'left',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--accent, #7c83ff)',
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 600,
+              padding: '6px 8px',
+              borderRadius: 6,
+            }}
+          >
+            + New workspace
+          </button>
         </div>
       )}
     </div>
