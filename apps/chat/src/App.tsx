@@ -8,6 +8,7 @@ import {
   ChatStore,
   DiffRouter,
   DiffOverlay,
+  SurfaceBoundary,
   PageOpsHarness,
   ActionHarness,
   RenderDiagnosticsStore,
@@ -888,7 +889,11 @@ export function App() {
           }}
         >
           <DiffOverlay router={router} surfaceId={surfaceId} placement="inline">
-            {liveSurface ? <A2uiSurface surface={liveSurface} /> : null}
+            {liveSurface ? (
+              <SurfaceBoundary resetKey={surfaceId} label={surfaceId}>
+                <A2uiSurface surface={liveSurface} />
+              </SurfaceBoundary>
+            ) : null}
           </DiffOverlay>
         </div>
       );

@@ -113,6 +113,7 @@ export { ingest } from './ingest/ingest';
 
 export { DiffRouter } from './diff/diff-router';
 export { DiffOverlay } from './diff/DiffOverlay';
+export { SurfaceBoundary } from './components/SurfaceBoundary';
 export type { DiffOverlayProps } from './diff/DiffOverlay';
 export { computeContentDiff, diffIsEmpty } from './diff/diff-engine';
 export { withComponentIds } from './diff/with-component-ids';

@@ -4,6 +4,7 @@ import type { MessageProcessor, SurfaceModel } from '@a2ui/web_core/v0_9';
 import { RegionLayout } from './RegionLayout';
 import type { LayoutDescriptor } from './layout-descriptor';
 import { DiffOverlay } from '../diff/DiffOverlay';
+import { SurfaceBoundary } from '../components/SurfaceBoundary';
 import type { DiffRouter } from '../diff/diff-router';
 import type { PageOpsHarness } from '../harness/PageOpsHarness';
 import type { PageMapping } from '../types/diff';
@@ -130,18 +131,28 @@ export function Page(props: PageProps) {
     const liveSurface: SurfaceModel<ReactComponentImplementation> | undefined =
       live.model.getSurface(surfaceId);
     if (source === 'ghost') {
-      return liveSurface ? <A2uiSurface surface={liveSurface} /> : null;
+      return liveSurface ? (
+        <SurfaceBoundary resetKey={surfaceId} label={surfaceId}>
+          <A2uiSurface surface={liveSurface} />
+        </SurfaceBoundary>
+      ) : null;
     }
     if (router) {
       return (
         <DiffOverlay router={router} surfaceId={surfaceId}>
-          {liveSurface ? <A2uiSurface surface={liveSurface} /> : null}
+          {liveSurface ? (
+            <SurfaceBoundary resetKey={surfaceId} label={surfaceId}>
+              <A2uiSurface surface={liveSurface} />
+            </SurfaceBoundary>
+          ) : null}
         </DiffOverlay>
       );
     }
     return liveSurface ? (
       <SurfaceIdProvider surfaceId={surfaceId}>
-        <A2uiSurface surface={liveSurface} />
+        <SurfaceBoundary resetKey={surfaceId} label={surfaceId}>
+          <A2uiSurface surface={liveSurface} />
+        </SurfaceBoundary>
       </SurfaceIdProvider>
     ) : null;
   };
@@ -180,7 +191,9 @@ export function Page(props: PageProps) {
     const liveSurface = surfaceId ? live.model.getSurface(surfaceId) : undefined;
     const inner = liveSurface ? (
       <SurfaceIdProvider surfaceId={surfaceId!}>
-        <A2uiSurface surface={liveSurface} />
+        <SurfaceBoundary resetKey={surfaceId} label={surfaceId!}>
+          <A2uiSurface surface={liveSurface} />
+        </SurfaceBoundary>
       </SurfaceIdProvider>
     ) : (
       <div

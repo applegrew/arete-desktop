@@ -62,13 +62,26 @@ export const DataTable = createComponentImplementation(DataTableApi, ({ props, c
   const dispatchAction = useAction({ sourceComponentId: context.componentModel.id });
   const action = props.action;
 
+  // Tolerate a malformed spec: a bad agent/handler render (e.g. data set from a
+  // tool field that didn't exist) must degrade to an empty table + a diagnostic,
+  // NEVER throw — an uncaught throw here takes down the whole React tree.
+  const data = Array.isArray(props.data) ? props.data : [];
+  const columns = Array.isArray(props.columns) ? props.columns : [];
+
   // Spec-level rendering problems → fed back to the agent loop for self-correction.
   const diagnostics: DiagnosticInput[] = [];
-  if (props.columns.length === 0) {
+  if (columns.length === 0) {
     diagnostics.push({
       severity: 'warning',
       code: 'datatable.no-columns',
       message: 'DataTable has no columns, so nothing renders. Provide a non-empty columns array.',
+    });
+  }
+  if (!Array.isArray(props.data)) {
+    diagnostics.push({
+      severity: 'error',
+      code: 'datatable.data-not-array',
+      message: 'DataTable "data" is missing/not an array (rendered empty). Set data to the array of row objects — e.g. the rows field of the tool result, not the whole result.',
     });
   }
   useReportDiagnostics(context.componentModel.id, diagnostics);
@@ -76,7 +89,7 @@ export const DataTable = createComponentImplementation(DataTableApi, ({ props, c
   const lazy = props.lazy === true;
   const pageAction = props.pageAction;
   const paginator = lazy || (typeof props.rowsPerPage === 'number' && props.rowsPerPage > 0);
-  const rows = props.rowsPerPage ?? (lazy ? props.data.length || 10 : undefined);
+  const rows = props.rowsPerPage ?? (lazy ? data.length || 10 : undefined);
 
   // Lazy/server-pagination props are spread ONLY in lazy mode — passing them
   // (even as undefined) in client mode disturbs PrimeReact's internal paging.
@@ -84,7 +97,7 @@ export const DataTable = createComponentImplementation(DataTableApi, ({ props, c
     ? {
         lazy: true,
         first: props.first ?? 0,
-        totalRecords: props.totalRecords ?? props.data.length,
+        totalRecords: props.totalRecords ?? data.length,
         loading: props.loading,
         onPage: pageAction
           ? (e: DataTablePageEvent) =>
@@ -109,7 +122,7 @@ export const DataTable = createComponentImplementation(DataTableApi, ({ props, c
         </div>
       )}
       <PrimeDataTable
-        value={props.data}
+        value={data}
         paginator={paginator}
         rows={paginator ? rows : undefined}
         {...lazyProps}
@@ -128,7 +141,7 @@ export const DataTable = createComponentImplementation(DataTableApi, ({ props, c
             : undefined
         }
       >
-        {props.columns.map((c) => (
+        {columns.map((c) => (
           <Column key={c.field} field={c.field} header={c.header ?? c.field} sortable={c.sortable ?? true} />
         ))}
       </PrimeDataTable>
