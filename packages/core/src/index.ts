@@ -50,6 +50,8 @@ export type {
   OnProposed,
   OnApprove,
   OnReject,
+  OnOpError,
+  OpError,
   ResolveDataPath,
   A2uiInboundMessage,
   UserAction,

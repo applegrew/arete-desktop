@@ -3,6 +3,7 @@ import type { PageMapping, PageDiff } from '../types/diff';
 import type {
   HookContextValue,
   OnApprove,
+  OnOpError,
   OnPageOp,
   OnProposed,
   OnReject,
@@ -28,6 +29,7 @@ interface HarnessHooks {
   onProposed?: OnProposed;
   onApprove?: OnApprove;
   onReject?: OnReject;
+  onOpError?: OnOpError;
 }
 
 type Listener = () => void;
@@ -49,6 +51,7 @@ export class PageOpsHarness {
       onProposed: hooks.onProposed,
       onApprove: hooks.onApprove,
       onReject: hooks.onReject,
+      onOpError: hooks.onOpError,
     };
   }
 
@@ -140,10 +143,11 @@ export class PageOpsHarness {
     } catch (err) {
       // A malformed op (e.g. setPageRegion targeting a region the page's layout
       // doesn't have) must never crash the app — registration flush runs during
-      // React render, where a throw takes down the whole tree. Drop it + warn.
-      console.warn(
-        `[arete] page op "${op.name}" on page "${pageId}" skipped: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      // React render, where a throw takes down the whole tree. Drop it, but report
+      // it (NOT silently): the consumer surfaces it to the user AND feeds it back to
+      // the agent, so the next turn can correct — page ops behave like tool calls.
+      const message = err instanceof Error ? err.message : String(err);
+      this.hooks.onOpError?.({ pageId, op, message });
       return;
     }
 

@@ -20,6 +20,9 @@ export interface HookContextValue {
   onProposed: OnProposed;
   onApprove: OnApprove;
   onReject: OnReject;
+  /** A page op could not be applied (e.g. invalid region). Consumers surface this
+   *  to the user AND feed it back to the agent — page ops must not fail silently. */
+  onOpError?: OnOpError;
 }
 
 export type A2uiInboundMessage = A2uiMessage;
@@ -50,6 +53,14 @@ export type OnPageOp = (op: PageOp, ctx: PageOpContext) => PageOp | null;
 export type OnProposed = (diff: Diff) => void;
 export type OnApprove = (diff: Diff) => void;
 export type OnReject = (diff: Diff) => void;
+
+/** Reports a page op that failed to apply. */
+export interface OpError {
+  pageId: string;
+  op: PageOp;
+  message: string;
+}
+export type OnOpError = (error: OpError) => void;
 
 export const defaultHooks: HookContextValue = {
   onBeforeApply: (messages) => messages,

@@ -11,6 +11,7 @@ import {
   PageOpsHarness,
   ActionHarness,
   RenderDiagnosticsStore,
+  type RenderDiagnostic,
   withComponentIds,
   buildAgentContext,
   deriveSurfaceLabel,
@@ -22,6 +23,7 @@ import {
   type LayoutDescriptor,
   type Diff,
   type UserAction,
+  type OpError,
   type SurfaceSnapshot,
   type ChatRole,
 } from '@arete-desktop/core';
@@ -123,6 +125,10 @@ export function App() {
   // append agent-driven renders to the timeline.
   const recordTimelineRef = useRef<(surfaceId: string, trigger: string) => void>(() => {});
   const recentSurfaceIdsRef = useRef<string[]>([]);
+  // Page-op failures (e.g. pinSurface into a layout with no regions). Buffered here,
+  // drained into the NEXT agent turn's diagnostics so the agent gets accurate
+  // feedback (like a tool error) and can correct — page ops never fail silently.
+  const pageOpErrorsRef = useRef<RenderDiagnostic[]>([]);
   const handlePromptRef = useRef<(text: string, fromUserAction?: boolean) => void | Promise<void>>(() => {});
 
   // Per-surface user-action serialization. While a surface's action turn is
@@ -357,6 +363,18 @@ export function App() {
               : `Layout changes rejected.`,
         });
       },
+      onOpError: ({ pageId, op, message }: OpError) => {
+        // User sees it...
+        chatStore.push({ role: 'system', text: `Couldn't apply ${op.name} on page "${pageId}": ${message}` });
+        // ...and the agent gets it next turn (drained into context.diagnostics).
+        const sid = 'surfaceId' in op ? (op as { surfaceId?: string }).surfaceId : undefined;
+        pageOpErrorsRef.current.push({
+          surfaceId: sid,
+          severity: 'error',
+          code: `pageop.${op.name}.failed`,
+          message: `Page op "${op.name}" on page "${pageId}" failed: ${message}. Re-issue it differently (e.g. a valid region/page) or tell the user it can't be done.`,
+        });
+      },
       onBeforeApply: (messages: unknown[]) => messages as never,
       onPageOp: (op: unknown) => op as never,
       onUserAction: (action: UserAction) => {
@@ -528,7 +546,16 @@ export function App() {
       }
 
       const pagesCtx: Record<string, { layout: LayoutDescriptor; mapping: Record<string, string> }> = {};
-      for (const p of pagesRef.current) pagesCtx[p.id] = { layout: p.layout, mapping: p.mapping };
+      for (const p of pagesRef.current) {
+        // Keep the agent's page view ACCURATE: omit mapping entries whose surface
+        // isn't actually live (e.g. a stale/deleted surface), so it never reasons
+        // about a phantom occupant and sees the region as genuinely free.
+        const mapping: Record<string, string> = {};
+        for (const [sid, region] of Object.entries(p.mapping)) {
+          if (liveProcessor.model.getSurface(sid) != null) mapping[sid] = region;
+        }
+        pagesCtx[p.id] = { layout: p.layout, mapping };
+      }
 
       const { messages: allMessages, ...agentContext } = buildAgentContext({
         chatStore,
@@ -542,6 +569,12 @@ export function App() {
         recentPinnedSurfaceId: [...pinnedSurfaceIdsRef.current].pop() ?? null,
         chatSurfaceIds: chatStore.getSnapshot().filter((e) => e.surfaceId != null).map((e) => e.surfaceId!),
       });
+      // Fold any buffered page-op failures into this turn's diagnostics (then clear,
+      // so the agent is told once and they age out — like a tool error in history).
+      if (pageOpErrorsRef.current.length) {
+        agentContext.diagnostics = [...agentContext.diagnostics, ...pageOpErrorsRef.current];
+        pageOpErrorsRef.current = [];
+      }
       const last = allMessages[allMessages.length - 1];
       const priorMessages =
         last && last.role === 'user' && last.content === text ? allMessages.slice(0, -1) : allMessages;
