@@ -80,22 +80,21 @@ function sameUserAction(a: UserAction, b: UserAction): boolean {
 }
 
 export function App() {
-  const currentCatalog = useMemo(() => withComponentIds(primeReactCatalog), []);
+  // These are STATEFUL singletons (they hold surfaces, handlers, diffs, chat…), not
+  // derived values — so create them with useState lazy-init, NOT useMemo. Vite Fast
+  // Refresh preserves useState/useRef across an edit but DISCARDS useMemo, which
+  // would silently reset the live processor + WidgetManager to empty (blank surfaces,
+  // and the debounced save then wipes the persisted handlers). useState keeps them.
+  const [currentCatalog] = useState(() => withComponentIds(primeReactCatalog));
   const catalogId = useMemo(() => (currentCatalog as { id: string }).id, [currentCatalog]);
 
-  const liveProcessor = useMemo(
-    () => new MessageProcessor<ReactComponentImplementation>([currentCatalog]),
-    [currentCatalog],
-  );
-  const shadowProcessor = useMemo(
-    () => new MessageProcessor<ReactComponentImplementation>([currentCatalog]),
-    [currentCatalog],
-  );
-  const router = useMemo(() => new DiffRouter(liveProcessor, shadowProcessor), [liveProcessor, shadowProcessor]);
-  const harness = useMemo(() => new PageOpsHarness(), []);
-  const actionHarness = useMemo(() => new ActionHarness(), []);
-  const renderDiagnostics = useMemo(() => new RenderDiagnosticsStore(), []);
-  const chatStore = useMemo(() => new ChatStore(), []);
+  const [liveProcessor] = useState(() => new MessageProcessor<ReactComponentImplementation>([currentCatalog]));
+  const [shadowProcessor] = useState(() => new MessageProcessor<ReactComponentImplementation>([currentCatalog]));
+  const [router] = useState(() => new DiffRouter(liveProcessor, shadowProcessor));
+  const [harness] = useState(() => new PageOpsHarness());
+  const [actionHarness] = useState(() => new ActionHarness());
+  const [renderDiagnostics] = useState(() => new RenderDiagnosticsStore());
+  const [chatStore] = useState(() => new ChatStore());
 
   const [diffsGated, setDiffsGated] = useState(true);
   // Gates all persistence writes until the initial DB restore completes, so the
@@ -185,7 +184,7 @@ export function App() {
   }, []);
 
   // Agent-authored widget action handlers (server-run scripts that replace LLM turns).
-  const widgetManager = useMemo(() => new WidgetManager(), []);
+  const [widgetManager] = useState(() => new WidgetManager());
 
   const [shellState, setShellState] = useState<ShellState>({ activeTabId: 'chat', chatDockState: 'dock' });
 
