@@ -67,6 +67,8 @@ export const DataTable = createComponentImplementation(DataTableApi, ({ props, c
   // NEVER throw — an uncaught throw here takes down the whole React tree.
   const data = Array.isArray(props.data) ? props.data : [];
   const columns = Array.isArray(props.columns) ? props.columns : [];
+  const lazy = props.lazy === true;
+  const pageAction = props.pageAction;
 
   // Spec-level rendering problems → fed back to the agent loop for self-correction.
   const diagnostics: DiagnosticInput[] = [];
@@ -84,10 +86,24 @@ export const DataTable = createComponentImplementation(DataTableApi, ({ props, c
       message: 'DataTable "data" is missing/not an array (rendered empty). Set data to the array of row objects — e.g. the rows field of the tool result, not the whole result.',
     });
   }
+  // Steer toward client-side pagination: lazy/server paging is fragile (esp. with
+  // cursor tools), and if you already hold all the rows it is pointless.
+  if (lazy && data.length >= (props.totalRecords ?? 0)) {
+    diagnostics.push({
+      severity: 'warning',
+      code: 'datatable.prefer-client-paging',
+      message: 'This DataTable is lazy but already holds all rows. Drop "lazy" and "pageAction" and use client-side pagination (set "rowsPerPage", put all rows in "data"); page navigation then works in-browser with no tool calls or cursors.',
+    });
+  }
+  if (lazy && !pageAction) {
+    diagnostics.push({
+      severity: 'warning',
+      code: 'datatable.lazy-without-page-action',
+      message: 'A lazy DataTable cannot advance pages without a "pageAction". Prefer client-side pagination (omit "lazy", set "rowsPerPage", put all rows in "data").',
+    });
+  }
   useReportDiagnostics(context.componentModel.id, diagnostics);
 
-  const lazy = props.lazy === true;
-  const pageAction = props.pageAction;
   const paginator = lazy || (typeof props.rowsPerPage === 'number' && props.rowsPerPage > 0);
   const rows = props.rowsPerPage ?? (lazy ? data.length || 10 : undefined);
 
