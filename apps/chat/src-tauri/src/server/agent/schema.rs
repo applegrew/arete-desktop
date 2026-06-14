@@ -20,8 +20,8 @@ pub fn envelope_schema() -> Value {
                         "messages": { "type": "array", "items": {} },
                         "op": page_op_schema(),
                         // widgetScript: a JS handler attached to a surface for an action event.
+                        // One runtime (the webview); no server/client flag.
                         "event": { "type": "string" },
-                        "runtime": { "type": "string", "enum": ["server", "client"] },
                         "code": { "type": "string" }
                     },
                     "required": ["kind"],

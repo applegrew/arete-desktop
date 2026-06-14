@@ -66,13 +66,25 @@ export function streamAgent(
 }
 
 /**
- * Run a surface's agent-authored handler script server-side (NO LLM) and stream
- * the resulting surface emissions back through the same AG-UI decoder pipeline.
+ * Execute ONE MCP tool via the backend proxy and return its parsed result. Used by
+ * webview-run widget handlers — their `tools.<name>(args)` calls land here so auth,
+ * MCP transport, and result parsing stay server-side. Parses the result text as JSON
+ * (the common case), falling back to the raw string. Throws on tool error.
  */
-export function streamWidgetAction(
-  body: { surfaceId: string; event: string; ctx: unknown; code: string; surface: unknown },
-  handlers: AgUiHandlers,
-  signal?: AbortSignal,
-): Promise<void> {
-  return streamSse('/api/widget-action', body, handlers, signal);
+export async function callMcpTool(name: string, args: unknown, signal?: AbortSignal): Promise<unknown> {
+  const res = await fetch(`${apiOrigin()}/api/mcp-call`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, args: args ?? {} }),
+    signal,
+  });
+  if (!res.ok) throw new Error(`tool ${name} failed: ${res.status} ${res.statusText}`);
+  const { text, isError } = (await res.json()) as { text?: string; isError?: boolean };
+  if (isError) throw new Error(text || `tool ${name} returned an error`);
+  if (text == null) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }

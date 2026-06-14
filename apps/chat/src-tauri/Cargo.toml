@@ -36,7 +36,6 @@ rmcp = { version = "1", features = ["client", "transport-child-process", "transp
 reqwest_mcp = { package = "reqwest", version = "0.13" }
 futures = "0.3"
 sse-stream = "0.2"
-rquickjs = { version = "0.12", features = ["futures", "macro", "parallel"] }
 
 [features]
 # default Tauri custom-protocol feature for production builds

@@ -29,7 +29,6 @@ export interface WidgetScriptEmission {
   kind: 'widgetScript';
   targetSurfaceId: string;
   event: string;
-  runtime: 'server' | 'client';
   code: string;
 }
 

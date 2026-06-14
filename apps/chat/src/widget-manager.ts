@@ -2,8 +2,8 @@ import type { WidgetHandler } from './persistence';
 
 /**
  * Holds the agent-authored action handlers per surface. When a user action fires,
- * App consults `handlerFor(surfaceId, event)`; a hit is run by the Widget Manager
- * (server endpoint or, later, a client sandbox) instead of routing to the LLM.
+ * App consults `handlerFor(surfaceId, event)`; a hit is run in the webview's JS
+ * engine (one runtime) instead of routing to the LLM.
  *
  * The agent attaches handlers via `widgetScript` emissions; they're persisted on
  * the surface (`ApiSurface.handlers`) and reloaded on startup.

@@ -87,20 +87,8 @@ pub async fn run_agent_turn(
 
     match run_with_correction(ollama, convo, ctx).await {
         Ok(mut outcome) => {
-            // Compile-check emitted widget handlers; drop any that don't parse so a
-            // malformed local-model script never gets persisted/attached.
-            let mut kept = Vec::with_capacity(outcome.validated.len());
-            for em in outcome.validated.into_iter() {
-                if em.get("kind").and_then(|k| k.as_str()) == Some("widgetScript") {
-                    let code = em.get("code").and_then(|c| c.as_str()).unwrap_or("");
-                    if let Err(e) = super::widget::compile_check(code).await {
-                        log_llm(json!({ "phase": "widget.compile_error", "event": em.get("event"), "error": e }));
-                        continue;
-                    }
-                }
-                kept.push(em);
-            }
-            outcome.validated = kept;
+            // Widget handler scripts are validated client-side (the webview parses
+            // them via `new Function` before registering) — no server compile-check.
 
             // Render captured MCP-UI resources as their own surfaces (framework-driven).
             for r in &ui_resources {

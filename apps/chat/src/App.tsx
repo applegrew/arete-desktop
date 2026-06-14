@@ -26,9 +26,9 @@ import {
   type ChatRole,
 } from '@arete-desktop/core';
 import { primeReactCatalog, componentAgentHints } from '@arete-desktop/adapter-primereact';
-import { streamAgent, streamWidgetAction } from './agui-client';
+import { streamAgent, callMcpTool } from './agui-client';
 import { WidgetManager } from './widget-manager';
-import { runClientHandler } from './widget-client';
+import { runClientHandler, validateHandler } from './widget-client';
 import type { WidgetHandler, TimelineEntry } from './persistence';
 
 const MAX_TIMELINE_PER_SURFACE = 25;
@@ -618,16 +618,23 @@ export function App() {
                 harness.apply(op as never, { autoApprove: fromUserAction });
               }
             } else if (emission.kind === 'widgetScript') {
-              // The agent attached an action handler to a surface — register it so
-              // future occurrences of that event are handled without the LLM.
-              widgetManager.set(emission.targetSurfaceId, emission.event, {
-                runtime: emission.runtime,
-                code: emission.code,
-              });
-              chatStore.push({
-                role: 'system',
-                text: `Learned a handler for "${emission.event}" — future clicks run instantly.`,
-              });
+              // The agent attached an action handler to a surface — validate it in
+              // the webview engine (parse only) and register it so future occurrences
+              // of that event run instantly without the LLM. A syntactically bad
+              // handler is dropped (replacing the old server-side compile-check).
+              try {
+                validateHandler(emission.code);
+                widgetManager.set(emission.targetSurfaceId, emission.event, { code: emission.code });
+                chatStore.push({
+                  role: 'system',
+                  text: `Learned a handler for "${emission.event}" — future clicks run instantly.`,
+                });
+              } catch (e) {
+                chatStore.push({
+                  role: 'system',
+                  text: `Ignored an invalid "${emission.event}" handler: ${(e as Error).message}`,
+                });
+              }
             }
           },
           onRunError: ({ message }) => {
@@ -727,9 +734,11 @@ export function App() {
     return { components, dataModel, history: surfaceTimelineRef.current[surfaceId] ?? [] };
   }, [liveProcessor]);
 
-  // Run a surface's server handler script (no LLM) and apply its surface edits.
-  // On script failure, fall back to a normal LLM turn so the journey still works.
-  const runWidgetAction = useCallback(
+  // Run a surface's agent-authored handler in the webview's native JS engine (ONE
+  // runtime, no LLM). `render` applies edits to the live surface; `tools.<name>()`
+  // proxies to the backend MCP endpoint (auth stays server-side). On any failure,
+  // fall back to a normal LLM turn so the journey still works.
+  const runWidget = useCallback(
     async (action: UserAction, handler: WidgetHandler) => {
       const surfaceId = action.surfaceId;
       if (!surfaceId) return;
@@ -737,68 +746,35 @@ export function App() {
       const controller = new AbortController();
       abortControllersRef.current.add(controller);
       setBusyCount((c) => c + 1);
-      let errored = false;
-      try {
-        await streamWidgetAction(
-          { surfaceId, event: action.name, ctx: action.context ?? {}, code: handler.code, surface: buildSurfacePayload(surfaceId) },
-          {
-            onEmission: (emission) => {
-              if (emission.kind === 'a2ui') {
-                const messages = emission.messages as unknown[];
-                captureSurfaceContents(messages);
-                router.route(messages as never, { bypassGate: true });
-                recordTimeline(emission.targetSurfaceId, trigger);
-              }
-            },
-            onRunError: ({ message }) => {
-              errored = true;
-              chatStore.push({ role: 'system', text: `Widget action failed: ${message}` });
-            },
-          },
-          controller.signal,
-        );
-      } catch (err) {
-        if (!controller.signal.aborted) {
-          errored = true;
-          chatStore.push({ role: 'system', text: `Widget action failed: ${(err as Error).message}` });
-        }
-      } finally {
-        abortControllersRef.current.delete(controller);
-        setBusyCount((c) => c - 1);
-      }
-      if (errored && !controller.signal.aborted) {
-        await handlePromptRef.current(buildActionSynth(action, 1), true);
-      }
-    },
-    [router, chatStore, captureSurfaceContents, buildSurfacePayload, recordTimeline],
-  );
-
-  // Run a `runtime:"client"` handler in the QuickJS sandbox — instant, no network.
-  const runClientWidget = useCallback(
-    async (action: UserAction, handler: WidgetHandler) => {
-      const surfaceId = action.surfaceId;
-      if (!surfaceId) return;
-      const trigger = `handler:${action.name}`;
+      const tools = new Proxy(
+        {},
+        { get: (_t, name: string) => (args?: unknown) => callMcpTool(name, args, controller.signal) },
+      ) as Record<string, (args?: unknown) => Promise<unknown>>;
       try {
         await runClientHandler(handler.code, action.context ?? {}, buildSurfacePayload(surfaceId), {
           render: (target, comps) => {
             const sid = !target || target === 'self' ? surfaceId : target;
             applyComponents(sid, comps as unknown[], trigger);
           },
+          tools,
         });
       } catch (err) {
-        chatStore.push({ role: 'system', text: `Widget action failed: ${(err as Error).message}` });
-        await handlePromptRef.current(buildActionSynth(action, 1), true);
+        if (!controller.signal.aborted) {
+          chatStore.push({ role: 'system', text: `Widget action failed: ${(err as Error).message}` });
+          await handlePromptRef.current(buildActionSynth(action, 1), true);
+        }
+      } finally {
+        abortControllersRef.current.delete(controller);
+        setBusyCount((c) => c - 1);
       }
     },
     [applyComponents, buildSurfacePayload, chatStore],
   );
 
-  // Decide per action: a registered handler (Widget Manager, server or client) or the LLM.
+  // Decide per action: a registered Widget Manager handler (run in the webview) or the LLM.
   dispatchActionRef.current = (item) => {
     const h = widgetManager.handlerFor(item.action.surfaceId, item.action.name);
-    if (h && h.runtime === 'server') return runWidgetAction(item.action, h);
-    if (h && h.runtime === 'client') return runClientWidget(item.action, h);
+    if (h) return runWidget(item.action, h);
     return Promise.resolve(handlePromptRef.current(buildActionSynth(item.action, item.repeatCount), true));
   };
 

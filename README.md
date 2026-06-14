@@ -289,6 +289,7 @@ The sandbox demonstrates: chat full-page on chat tab; chat docked on other tabs;
 ### Agent loop quality
 - **Multi-step action chains** — action → form modal → submit → next action. Requires the agent to track an action-flow state machine across turns.
 - **Server-side validation depth** — schema-validate every emission's component-specific props (Chart needs `labels.length === data.length`; Calendar needs valid date ranges; etc.). Today only `id` / `children` references are validated.
+- **Widget handler sandbox hardening** — agent-authored Widget Manager handlers run in the webview's native JS engine via `new Function` with shadowed globals (a *soft* sandbox; a runaway loop can freeze the UI). Harden to a sandboxed iframe / Web Worker for real isolation + a terminable timeout (runaway-loop protection).
 
 ### Workspace
 - **Out-of-the-box catalogs beyond PrimeReact** — fw-dew adapter (Freshworks design system), MUI adapter, Ant Design adapter. Each is a new `packages/adapter-<name>` package wired to the same `@arete-desktop/core` hooks.

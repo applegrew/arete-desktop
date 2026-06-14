@@ -29,7 +29,8 @@ export interface ApiPage {
 }
 
 export interface WidgetHandler {
-  runtime: 'server' | 'client';
+  /** JS handler body. Runs in the webview's native engine (one runtime). A legacy
+   *  persisted `runtime` field may still be present; it is ignored. */
   code: string;
 }
 

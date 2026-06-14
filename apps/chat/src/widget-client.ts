@@ -1,25 +1,39 @@
-import { newQuickJSWASMModuleFromVariant, type QuickJSContext, type QuickJSWASMModule } from 'quickjs-emscripten';
-import variant from '@jitl/quickjs-singlefile-browser-release-sync';
-
-// Single-file variant: the WASM is inlined as base64 in the JS bundle, so there
-// is NO separate .wasm fetch. The default `getQuickJS()` fetches a .wasm URL,
-// which under vite / the Tauri webview resolves to index.html — yielding
-// "WebAssembly.Module doesn't parse at byte 0". The inlined variant avoids that.
-let modPromise: Promise<QuickJSWASMModule> | null = null;
-function getModule(): Promise<QuickJSWASMModule> {
-  return (modPromise ??= newQuickJSWASMModuleFromVariant(variant));
-}
-
 /**
- * Run a `runtime:"client"` widget handler in a QuickJS (WASM) sandbox — instant,
- * offline, no LLM. Client handlers are SYNCHRONOUS and pure-UI: they get `ctx`,
- * `surface` (which includes `surface.history` — the generic per-surface state
- * timeline), and `render(target, components, opts)`. They CANNOT call tools (those
- * need the server). No DOM/network/timers are exposed. "Back" is not a primitive —
- * a handler restores a prior view by rendering an entry from `surface.history`.
+ * Run an agent-authored widget handler in the webview's OWN JS engine — no second
+ * engine, no WASM. There is ONE runtime. Handlers get a curated host API: `ctx`,
+ * `surface` (incl. `surface.history` — the generic state timeline), `render(target,
+ * components)`, and async `tools.<name>(args)`. "Back" is not a primitive — a handler
+ * restores a prior view by rendering an entry from `surface.history`.
+ *
+ * Sandbox: the handler runs via `new Function` with dangerous globals shadowed to
+ * `undefined`. This is a SOFT sandbox (not a hard security boundary) and a runaway
+ * loop can freeze the UI — acceptable because handlers are our own LLM-authored,
+ * persisted, small, deterministic scripts. (Hardening to a sandboxed iframe/Worker
+ * is tracked in the README todos.)
  */
 export interface ClientHooks {
-  render: (target: string, components: unknown, opts: Record<string, unknown>) => void;
+  /** Replace a surface's components. target "self" = the acting surface. */
+  render: (target: string, components: unknown) => void;
+  /** Proxy object: `tools.<name>(args)` → Promise of the tool's parsed result. */
+  tools: Record<string, (args?: unknown) => Promise<unknown>>;
+}
+
+// Globals shadowed (bound to `undefined`) inside the handler scope so a script
+// can't trivially reach the DOM, network, or storage. NOTE: `eval` and `arguments`
+// are intentionally NOT here — they are illegal as parameter names under the
+// `"use strict"` body and would throw a SyntaxError. (Soft sandbox: shadowing the
+// network/DOM/storage globals covers the meaningful cases; it is not a hard boundary.)
+const SHADOWED_GLOBALS = [
+  'window', 'document', 'fetch', 'XMLHttpRequest', 'WebSocket',
+  'localStorage', 'sessionStorage', 'indexedDB', 'Function',
+  'globalThis', 'self', 'importScripts', 'location', 'parent', 'top',
+] as const;
+
+/** Compile-check a handler (parse only, no execution). Throws on a syntax error. */
+export function validateHandler(code: string): void {
+  // Constructing the function parses the body; it is never invoked here.
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+  new Function(...SHADOWED_GLOBALS, 'ctx', 'surface', 'render', 'tools', `"use strict";\n${code}`);
 }
 
 export async function runClientHandler(
@@ -28,61 +42,19 @@ export async function runClientHandler(
   surfaceObj: unknown,
   hooks: ClientHooks,
 ): Promise<void> {
-  const QuickJS = await getModule();
-  const vm = QuickJS.newContext();
-  try {
-    setStr(vm, '__ctx_json', JSON.stringify(ctxObj ?? {}));
-    setStr(vm, '__surface_json', JSON.stringify(surfaceObj ?? {}));
-
-    const renderFn = vm.newFunction('__render', (t, c, o) => {
-      const target = vm.getString(t);
-      const components = safeParse(vm.getString(c), []);
-      const opts = safeParse(vm.getString(o), {}) as Record<string, unknown>;
-      hooks.render(target, components, opts);
-    });
-    vm.setProp(vm.global, '__render', renderFn);
-    renderFn.dispose();
-
-    const prelude = `
-      globalThis.ctx = JSON.parse(__ctx_json);
-      globalThis.surface = JSON.parse(__surface_json);
-      if (!globalThis.surface.history) globalThis.surface.history = [];
-      globalThis.render = function (target, components, opts) {
-        __render(
-          String(target == null ? 'self' : target),
-          JSON.stringify(components == null ? [] : components),
-          JSON.stringify(opts == null ? {} : opts),
-        );
-      };
-    `;
-    evalOrThrow(vm, prelude);
-    // Synchronous body — client handlers don't await (no async host fns).
-    evalOrThrow(vm, `(() => {\n${code}\n})()`);
-  } finally {
-    vm.dispose();
-  }
-}
-
-function setStr(vm: QuickJSContext, name: string, val: string): void {
-  const s = vm.newString(val);
-  vm.setProp(vm.global, name, s);
-  s.dispose();
-}
-
-function safeParse(s: string, fallback: unknown): unknown {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return fallback;
-  }
-}
-
-function evalOrThrow(vm: QuickJSContext, code: string): void {
-  const r = vm.evalCode(code);
-  if (r.error) {
-    const dumped = vm.dump(r.error);
-    r.error.dispose();
-    throw new Error(typeof dumped === 'string' ? dumped : JSON.stringify(dumped));
-  }
-  r.value.dispose();
+  const render = (target?: unknown, components?: unknown) => {
+    hooks.render(target == null ? 'self' : String(target), components == null ? [] : components);
+  };
+  // Wrap the body in an async IIFE so handlers may `await tools.x()`; pure-UI
+  // handlers simply don't await. The outer fn returns that promise to us.
+  const body = `"use strict";\nreturn (async () => {\n${code}\n})();`;
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+  const fn = new Function(...SHADOWED_GLOBALS, 'ctx', 'surface', 'render', 'tools', body) as (
+    ...args: unknown[]
+  ) => Promise<void>;
+  const surface = (surfaceObj && typeof surfaceObj === 'object' ? surfaceObj : {}) as Record<string, unknown>;
+  if (!Array.isArray(surface.history)) surface.history = [];
+  // SHADOWED_GLOBALS are passed positionally as `undefined`, then the real args.
+  const shadow = SHADOWED_GLOBALS.map(() => undefined);
+  await fn(...shadow, ctxObj ?? {}, surface, render, hooks.tools);
 }

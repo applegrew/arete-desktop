@@ -6,7 +6,6 @@ pub mod schema;
 pub mod skills;
 pub mod sse;
 pub mod turn;
-pub mod widget;
 
 use axum::{
     body::Body,
@@ -134,53 +133,18 @@ pub async fn run_turn(State(st): State<AppState>, Json(body): Json<Value>) -> Re
         .unwrap()
 }
 
-/// POST /api/widget-action — run a surface's agent-authored JS handler in the
-/// sandbox (NO LLM) and stream the resulting surface emissions as AG-UI SSE.
-/// Body: `{ surfaceId, event, ctx, code, surface }` (code + surface supplied by
-/// the client's Widget Manager, which holds them per surface).
-pub async fn run_widget_action(State(st): State<AppState>, Json(body): Json<Value>) -> Response {
-    let code = body.get("code").and_then(|c| c.as_str()).unwrap_or("").to_string();
-    let ctx = body.get("ctx").cloned().unwrap_or_else(|| json!({}));
-    let surface = body.get("surface").cloned().unwrap_or_else(|| json!({}));
-    let surface_id = body.get("surfaceId").and_then(|s| s.as_str()).unwrap_or("").to_string();
-    let run_id = uuid::Uuid::new_v4().to_string();
-    let thread_id = uuid::Uuid::new_v4().to_string();
-
-    let (tx, rx) = mpsc::channel::<Result<Bytes, io::Error>>(64);
-    let task = tokio::spawn(async move {
-        let sink = Sink::new(tx);
-        sink.run_started(&thread_id, &run_id).await;
-        if code.is_empty() || surface_id.is_empty() {
-            sink.run_error("widget-action missing code/surfaceId", Some("400")).await;
-            return;
-        }
-        // Ensure MCP tools are discovered so `tools.<name>()` resolves in the sandbox.
-        mcp::ensure(&st).await;
-        match widget::run_handler(st.clone(), &code, ctx, surface.clone(), surface_id.clone()).await {
-            Ok(raw) => {
-                // Validate via the same pipeline. The acting surface is "known" so
-                // its updateComponents pass; component-ref checks still run.
-                let known_ctx = json!({
-                    "surfaces": { surface_id: { "components": surface.get("components").cloned().unwrap_or_else(|| json!([])) } }
-                });
-                let result = turn::process_emissions(&raw, &known_ctx);
-                for emission in &result.validated {
-                    sink.emission(emission).await;
-                }
-                sink.run_finished(&thread_id, &run_id).await;
-            }
-            Err(e) => {
-                sink.run_error(&format!("widget script error: {e}"), Some("500")).await;
-            }
-        }
-    });
-
-    let stream = GuardedStream { inner: ReceiverStream::new(rx), _guard: AbortOnDrop(task) };
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/event-stream")
-        .header(header::CACHE_CONTROL, "no-cache")
-        .header(header::CONNECTION, "keep-alive")
-        .body(Body::from_stream(stream))
-        .unwrap()
+/// POST /api/mcp-call — execute ONE MCP tool and return its result. Webview-run
+/// widget handlers proxy their `tools.<name>(args)` calls here so auth, MCP
+/// transport, and result parsing stay server-side. Body: `{ name, args }`.
+/// Loopback-only; same trust level as `/api/agui`.
+pub async fn mcp_call(State(st): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
+    let name = body.get("name").and_then(|n| n.as_str()).unwrap_or("");
+    let args = body.get("args").cloned().unwrap_or_else(|| json!({}));
+    if name.is_empty() {
+        return Json(json!({ "text": "missing tool name", "isError": true }));
+    }
+    // Ensure MCP tools are discovered so the call resolves.
+    mcp::ensure(&st).await;
+    let outcome = mcp::call(&st, name, args).await;
+    Json(json!({ "text": outcome.text, "isError": outcome.is_error }))
 }
