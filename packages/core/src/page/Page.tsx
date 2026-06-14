@@ -132,18 +132,22 @@ export function Page(props: PageProps) {
       live.model.getSurface(surfaceId);
     if (source === 'ghost') {
       return liveSurface ? (
-        <SurfaceBoundary resetKey={surfaceId} label={surfaceId}>
-          <A2uiSurface surface={liveSurface} />
-        </SurfaceBoundary>
+        <SurfaceIdProvider surfaceId={surfaceId}>
+          <SurfaceBoundary resetKey={surfaceId} label={surfaceId}>
+            <A2uiSurface surface={liveSurface} />
+          </SurfaceBoundary>
+        </SurfaceIdProvider>
       ) : null;
     }
     if (router) {
       return (
         <DiffOverlay router={router} surfaceId={surfaceId}>
           {liveSurface ? (
-            <SurfaceBoundary resetKey={surfaceId} label={surfaceId}>
-              <A2uiSurface surface={liveSurface} />
-            </SurfaceBoundary>
+            <SurfaceIdProvider surfaceId={surfaceId}>
+              <SurfaceBoundary resetKey={surfaceId} label={surfaceId}>
+                <A2uiSurface surface={liveSurface} />
+              </SurfaceBoundary>
+            </SurfaceIdProvider>
           ) : null}
         </DiffOverlay>
       );

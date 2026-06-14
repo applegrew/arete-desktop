@@ -9,6 +9,7 @@ import {
   DiffRouter,
   DiffOverlay,
   SurfaceBoundary,
+  SurfaceIdProvider,
   PageOpsHarness,
   ActionHarness,
   RenderDiagnosticsStore,
@@ -805,9 +806,28 @@ export function App() {
         });
         // Muted breadcrumb: a learned handler short-circuited this action (no LLM).
         chatStore.push({ role: 'system', text: `⚡ Auto-handled "${action.name}" with a learned script — no agent turn.` });
+        // The handler may run WITHOUT throwing yet still render a structurally-broken
+        // surface (e.g. a DataTable whose data came out undefined → empty, no pages).
+        // Components report an error-severity diagnostic for that; detect it after the
+        // render commits and treat it like a failure — feed it back + ask the agent to
+        // fix the handler. (setTimeout: let React commit + the diagnostic effect run.)
+        const sid = surfaceId;
+        const ev = action.name;
+        setTimeout(() => {
+          if (controller.signal.aborted) return;
+          const errs = renderDiagnostics.getBySurface(sid).filter((d) => d.severity === 'error');
+          if (!errs.length) return;
+          chatStore.push({
+            role: 'system',
+            text: `The "${ev}" script ran but rendered a broken surface (${errs[0]?.message ?? 'render error'}) — asking the agent to fix it.`,
+          });
+          // renderDiagnostics are already folded into the next turn's context, so the
+          // agent sees the specifics and can re-emit a corrected handler.
+          void handlePromptRef.current(buildActionSynth(action, 1), true);
+        }, 0);
       } catch (err) {
         if (!controller.signal.aborted) {
-          const msg = (err as Error).message;
+          const msg = err instanceof Error ? err.message : String(err);
           chatStore.push({ role: 'system', text: `Widget action failed: ${msg}` });
           // Feed the runtime failure back to the agent so the fallback turn can
           // re-emit a CORRECTED handler (e.g. the tool args were wrong — cursor-based
@@ -825,7 +845,7 @@ export function App() {
         setBusyCount((c) => c - 1);
       }
     },
-    [applyComponents, buildSurfacePayload, chatStore],
+    [applyComponents, buildSurfacePayload, chatStore, renderDiagnostics],
   );
 
   // Decide per action: a registered Widget Manager handler (run in the webview) or the LLM.
@@ -890,9 +910,11 @@ export function App() {
         >
           <DiffOverlay router={router} surfaceId={surfaceId} placement="inline">
             {liveSurface ? (
-              <SurfaceBoundary resetKey={surfaceId} label={surfaceId}>
-                <A2uiSurface surface={liveSurface} />
-              </SurfaceBoundary>
+              <SurfaceIdProvider surfaceId={surfaceId}>
+                <SurfaceBoundary resetKey={surfaceId} label={surfaceId}>
+                  <A2uiSurface surface={liveSurface} />
+                </SurfaceBoundary>
+              </SurfaceIdProvider>
             ) : null}
           </DiffOverlay>
         </div>
