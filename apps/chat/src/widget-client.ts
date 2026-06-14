@@ -29,11 +29,21 @@ const SHADOWED_GLOBALS = [
   'globalThis', 'self', 'importScripts', 'location', 'parent', 'top',
 ] as const;
 
+// Build the handler function. The body is wrapped in an async IIFE so handlers may
+// `await tools.x()` (pure-UI handlers simply don't await). BOTH validate and run go
+// through here, so the parse-check matches what actually executes — critical: if
+// validate omitted the async wrapper, every `await`-using handler would falsely fail.
+function buildHandlerFn(code: string): (...args: unknown[]) => Promise<void> {
+  const body = `"use strict";\nreturn (async () => {\n${code}\n})();`;
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+  return new Function(...SHADOWED_GLOBALS, 'ctx', 'surface', 'render', 'tools', body) as (
+    ...args: unknown[]
+  ) => Promise<void>;
+}
+
 /** Compile-check a handler (parse only, no execution). Throws on a syntax error. */
 export function validateHandler(code: string): void {
-  // Constructing the function parses the body; it is never invoked here.
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-  new Function(...SHADOWED_GLOBALS, 'ctx', 'surface', 'render', 'tools', `"use strict";\n${code}`);
+  buildHandlerFn(code); // constructing parses the body; never invoked here
 }
 
 export async function runClientHandler(
@@ -45,13 +55,7 @@ export async function runClientHandler(
   const render = (target?: unknown, components?: unknown) => {
     hooks.render(target == null ? 'self' : String(target), components == null ? [] : components);
   };
-  // Wrap the body in an async IIFE so handlers may `await tools.x()`; pure-UI
-  // handlers simply don't await. The outer fn returns that promise to us.
-  const body = `"use strict";\nreturn (async () => {\n${code}\n})();`;
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-  const fn = new Function(...SHADOWED_GLOBALS, 'ctx', 'surface', 'render', 'tools', body) as (
-    ...args: unknown[]
-  ) => Promise<void>;
+  const fn = buildHandlerFn(code);
   const surface = (surfaceObj && typeof surfaceObj === 'object' ? surfaceObj : {}) as Record<string, unknown>;
   if (!Array.isArray(surface.history)) surface.history = [];
   // SHADOWED_GLOBALS are passed positionally as `undefined`, then the real args.
