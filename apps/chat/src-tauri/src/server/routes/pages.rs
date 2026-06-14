@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -7,20 +7,26 @@ use axum::{
 use serde_json::{json, Value};
 
 use crate::server::{
-    db, db::now_ms, default_layout, models::ApiPage, short_uuid, state::AppState, AppError,
+    db, db::now_ms, default_layout, models::ApiPage, routes::WsQuery, short_uuid, state::AppState,
+    AppError,
 };
 
-pub async fn list(State(st): State<AppState>) -> Result<Json<Vec<ApiPage>>, AppError> {
+pub async fn list(
+    State(st): State<AppState>,
+    Query(q): Query<WsQuery>,
+) -> Result<Json<Vec<ApiPage>>, AppError> {
     let conn = st.db.lock().unwrap();
-    Ok(Json(db::list_pages(&conn)?))
+    Ok(Json(db::list_pages(&conn, &q.id())?))
 }
 
 /// Create — or upsert by provided id (lets the agent's createPage use its own slug).
 pub async fn create(
     State(st): State<AppState>,
+    Query(q): Query<WsQuery>,
     Json(body): Json<Value>,
 ) -> Result<Json<ApiPage>, AppError> {
     let conn = st.db.lock().unwrap();
+    let ws = q.id();
     let b = body.as_object().cloned().unwrap_or_default();
     let now = now_ms();
 
@@ -46,9 +52,11 @@ pub async fn create(
         position: b
             .get("position")
             .and_then(|v| v.as_i64())
-            .unwrap_or_else(|| db::count_pages(&conn).unwrap_or(0)),
+            .unwrap_or_else(|| db::count_pages(&conn, &ws).unwrap_or(0)),
         created_at: existing.as_ref().map(|e| e.created_at).unwrap_or(now),
         updated_at: now,
+        // New page → the request's workspace; existing → keep its workspace.
+        workspace_id: existing.as_ref().map(|e| e.workspace_id.clone()).unwrap_or(ws),
     };
     db::upsert_page(&conn, &page)?;
     Ok(Json(page))
@@ -91,6 +99,7 @@ pub async fn update(
         position: b.get("position").and_then(|v| v.as_i64()).unwrap_or(cur.position),
         created_at: cur.created_at,
         updated_at: now_ms(),
+        workspace_id: cur.workspace_id,
     };
     db::upsert_page(&conn, &next)?;
     Ok(Json(next).into_response())

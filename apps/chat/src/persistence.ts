@@ -64,12 +64,15 @@ export interface ApiChatEntry {
   createdAt: number;
 }
 
-// Pages (the dynamic tab roster)
-export const loadPages = (): Promise<ApiPage[]> =>
-  jfetch<ApiPage[]>(`${BASE}/pages`).catch(() => []);
+// Content is scoped per workspace via a `?ws=<id>` query param.
+const ws = (workspaceId: string) => `?ws=${encodeURIComponent(workspaceId)}`;
 
-export const createPage = (page: Partial<ApiPage>): Promise<ApiPage> =>
-  jfetch<ApiPage>(`${BASE}/pages`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(page) });
+// Pages (the dynamic tab roster) — per workspace
+export const loadPages = (workspaceId: string): Promise<ApiPage[]> =>
+  jfetch<ApiPage[]>(`${BASE}/pages${ws(workspaceId)}`).catch(() => []);
+
+export const createPage = (workspaceId: string, page: Partial<ApiPage>): Promise<ApiPage> =>
+  jfetch<ApiPage>(`${BASE}/pages${ws(workspaceId)}`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(page) });
 
 export const updatePage = (id: string, patch: Partial<ApiPage>): Promise<void> =>
   jfetch(`${BASE}/pages/${id}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(patch) }).then(() => {});
@@ -77,26 +80,52 @@ export const updatePage = (id: string, patch: Partial<ApiPage>): Promise<void> =
 export const deletePage = (id: string): Promise<void> =>
   jfetch(`${BASE}/pages/${id}`, { method: 'DELETE' }).then(() => {});
 
-// Surfaces (global rendered-surface store, for restore on reload)
-export const loadSurfaces = (): Promise<ApiSurface[]> =>
-  jfetch<ApiSurface[]>(`${BASE}/surfaces`).catch(() => []);
+// Surfaces (rendered-surface store, for restore on reload) — per workspace
+export const loadSurfaces = (workspaceId: string): Promise<ApiSurface[]> =>
+  jfetch<ApiSurface[]>(`${BASE}/surfaces${ws(workspaceId)}`).catch(() => []);
 
-export const saveSurfaces = (surfaces: ApiSurface[]): Promise<void> =>
-  jfetch(`${BASE}/surfaces`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(surfaces) }).then(() => {});
+export const saveSurfaces = (workspaceId: string, surfaces: ApiSurface[]): Promise<void> =>
+  jfetch(`${BASE}/surfaces${ws(workspaceId)}`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(surfaces) }).then(() => {});
 
-// Chat transcript
-export const loadChat = (): Promise<ApiChatEntry[]> =>
-  jfetch<ApiChatEntry[]>(`${BASE}/chat`).catch(() => []);
+// Chat transcript — per workspace
+export const loadChat = (workspaceId: string): Promise<ApiChatEntry[]> =>
+  jfetch<ApiChatEntry[]>(`${BASE}/chat${ws(workspaceId)}`).catch(() => []);
 
-export const saveChat = (entries: ApiChatEntry[]): Promise<void> =>
-  jfetch(`${BASE}/chat`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(entries) }).then(() => {});
+export const saveChat = (workspaceId: string, entries: ApiChatEntry[]): Promise<void> =>
+  jfetch(`${BASE}/chat${ws(workspaceId)}`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(entries) }).then(() => {});
 
-// App state (active tab, chat dock)
-export const loadState = (): Promise<Record<string, unknown>> =>
-  jfetch<Record<string, unknown>>(`${BASE}/state`).catch(() => ({}));
+// --- Workspaces (multiple independent chat threads) -----------------------
+export interface ApiWorkspace {
+  id: string;
+  name: string;
+  position: number;
+  createdAt: number;
+  updatedAt: number;
+  /** Per-workspace UI state (which tab is active, chat dock state). */
+  activeTabId?: string;
+  chatDockState?: string;
+}
 
-export const saveState = (state: Record<string, unknown>): Promise<void> =>
-  jfetch(`${BASE}/state`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(state) }).then(() => {});
+export const loadWorkspaces = (): Promise<{ workspaces: ApiWorkspace[]; activeWorkspaceId: string | null }> =>
+  jfetch<{ workspaces: ApiWorkspace[]; activeWorkspaceId: string | null }>(`${BASE}/workspaces`).catch(() => ({
+    workspaces: [],
+    activeWorkspaceId: null,
+  }));
+
+export const createWorkspace = (name?: string): Promise<ApiWorkspace> =>
+  jfetch<ApiWorkspace>(`${BASE}/workspaces`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ name }) });
+
+export const updateWorkspace = (
+  id: string,
+  patch: { name?: string; activeTabId?: string; chatDockState?: string },
+): Promise<ApiWorkspace> =>
+  jfetch<ApiWorkspace>(`${BASE}/workspaces/${id}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(patch) });
+
+export const deleteWorkspace = (id: string): Promise<{ ok: boolean; activeWorkspaceId: string | null }> =>
+  jfetch(`${BASE}/workspaces/${id}`, { method: 'DELETE' });
+
+export const activateWorkspace = (id: string): Promise<{ ok: boolean; activeWorkspaceId: string }> =>
+  jfetch(`${BASE}/workspaces/${id}/activate`, { method: 'POST' });
 
 export async function getAgentHealth(): Promise<{ ok: boolean; model?: string; available?: string[] }> {
   try {

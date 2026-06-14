@@ -1,19 +1,26 @@
-use axum::{extract::State, Json};
+use axum::{
+    extract::{Query, State},
+    Json,
+};
 use serde_json::{json, Value};
 
-use crate::server::{db, models::ApiSurface, state::AppState, AppError};
+use crate::server::{db, models::ApiSurface, routes::WsQuery, state::AppState, AppError};
 
-pub async fn list(State(st): State<AppState>) -> Result<Json<Vec<ApiSurface>>, AppError> {
+pub async fn list(
+    State(st): State<AppState>,
+    Query(q): Query<WsQuery>,
+) -> Result<Json<Vec<ApiSurface>>, AppError> {
     let conn = st.db.lock().unwrap();
-    Ok(Json(db::list_surfaces(&conn)?))
+    Ok(Json(db::list_surfaces(&conn, &q.id())?))
 }
 
-/// Bulk replace — the client sends the full current surface set on each save.
+/// Bulk replace — the client sends the full current surface set for the workspace.
 pub async fn replace(
     State(st): State<AppState>,
+    Query(q): Query<WsQuery>,
     Json(surfaces): Json<Vec<ApiSurface>>,
 ) -> Result<Json<Value>, AppError> {
     let mut conn = st.db.lock().unwrap();
-    db::replace_surfaces(&mut conn, &surfaces)?;
+    db::replace_surfaces(&mut conn, &q.id(), &surfaces)?;
     Ok(Json(json!({ "ok": true })))
 }

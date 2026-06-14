@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MessageProcessor } from '@a2ui/web_core/v0_9';
 import { A2uiSurface, MarkdownContext, type ReactComponentImplementation } from '@a2ui/react/v0_9';
 import { renderMarkdown } from '@a2ui/markdown-it';
@@ -45,15 +45,20 @@ import {
   saveSurfaces,
   loadChat,
   saveChat,
-  loadState,
-  saveState,
+  updateWorkspace,
+  loadWorkspaces,
+  createWorkspace,
+  deleteWorkspace,
+  activateWorkspace,
   getAgentHealth,
   loadSettings,
   saveSettings,
   type ApiPage,
+  type ApiWorkspace,
   type AgentSettings,
 } from './persistence';
 import { SettingsPanel } from './SettingsPanel';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 const DEFAULT_LAYOUT: LayoutDescriptor = {
   kind: 'grid',
@@ -81,7 +86,21 @@ function sameUserAction(a: UserAction, b: UserAction): boolean {
   return a.name === b.name && a.sourceComponentId === b.sourceComponentId && deepEqual(a.context, b.context);
 }
 
-export function App() {
+/**
+ * One workspace's full state + UI. Keyed by `workspaceId` in <App>, so switching
+ * workspaces REMOUNTS this fresh — all singletons/refs re-initialize and the
+ * hydration effect reloads for the new workspace. No manual cross-workspace reset.
+ */
+interface WorkspaceViewProps {
+  workspaceId: string;
+  /** Per-workspace UI state from the workspace record (seeds shellState). */
+  initialActiveTabId?: string;
+  initialChatDockState?: string;
+  /** The workspace switcher (global), composed into the top bar by this view. */
+  switcherSlot: ReactNode;
+}
+
+function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, switcherSlot }: WorkspaceViewProps) {
   // These are STATEFUL singletons (they hold surfaces, handlers, diffs, chat…), not
   // derived values — so create them with useState lazy-init, NOT useMemo. Vite Fast
   // Refresh preserves useState/useRef across an edit but DISCARDS useMemo, which
@@ -188,7 +207,10 @@ export function App() {
   // Agent-authored widget action handlers (server-run scripts that replace LLM turns).
   const [widgetManager] = useState(() => new WidgetManager());
 
-  const [shellState, setShellState] = useState<ShellState>({ activeTabId: 'chat', chatDockState: 'dock' });
+  const [shellState, setShellState] = useState<ShellState>({
+    activeTabId: initialActiveTabId ?? 'chat',
+    chatDockState: (initialChatDockState as ShellState['chatDockState']) ?? 'dock',
+  });
 
   // Transient halo target — set when locating a surface moved to a page; auto-clears.
   const [highlightedSurfaceId, setHighlightedSurfaceId] = useState<string | null>(null);
@@ -266,10 +288,10 @@ export function App() {
         updatedAt: now,
       };
       commitPages([...pagesRef.current, page]);
-      createPage(page).catch(() => {});
+      createPage(workspaceId, page).catch(() => {});
       return id;
     },
-    [commitPages],
+    [commitPages, workspaceId],
   );
 
   const updatePageLocal = useCallback(
@@ -409,7 +431,7 @@ export function App() {
       }
 
       // 1. Surfaces → replay into the live processor (createSurface → update → dataModel).
-      const surfaces = await loadSurfaces();
+      const surfaces = await loadSurfaces(workspaceId);
       for (const s of surfaces) {
         const msgs: unknown[] = [
           { version: 'v0.9', createSurface: { surfaceId: s.surfaceId, catalogId, sendDataModel: true } },
@@ -434,7 +456,7 @@ export function App() {
       recentSurfaceIdsRef.current = surfaces.map((s) => s.surfaceId).slice(0, 10);
 
       // 2. Pages → roster (tabs). Mark pinned surfaces + gate.
-      const ps = await loadPages();
+      const ps = await loadPages(workspaceId);
       commitPages(ps);
       for (const pg of ps) {
         for (const sid of Object.keys(pg.mapping)) {
@@ -446,7 +468,7 @@ export function App() {
 
       // 3. Chat transcript. Re-derive the action chip label from the persisted
       //    synthetic text so restored action entries stay masked (not raw).
-      const chat = await loadChat();
+      const chat = await loadChat(workspaceId);
       for (const e of chat) {
         const actionLabel =
           e.role === 'action' ? (/event "([^"]+)"/.exec(e.text ?? '')?.[1] ?? 'action') : undefined;
@@ -459,17 +481,8 @@ export function App() {
         });
       }
 
-      // 4. App state (active tab + chat dock position).
-      const st = await loadState();
-      if (st) {
-        setShellState((s) => ({
-          ...s,
-          ...(typeof st.activeTabId === 'string' ? { activeTabId: st.activeTabId } : {}),
-          ...(st.chatDockState === 'page' || st.chatDockState === 'dock' || st.chatDockState === 'rail'
-            ? { chatDockState: st.chatDockState }
-            : {}),
-        }));
-      }
+      // 4. Per-workspace UI state (active tab + chat dock) is seeded into shellState
+      //    from the workspace record via props — no separate load needed.
       getAgentHealth()
         .then((h) => setAvailableModels(h.available ?? []))
         .catch(() => {});
@@ -490,10 +503,10 @@ export function App() {
         surfaceId: e.surfaceId,
         createdAt: e.createdAt,
       }));
-      saveChat(entries).catch(() => {});
+      saveChat(workspaceId, entries).catch(() => {});
     }, 1500);
     return () => clearTimeout(t);
-  }, [chatStore, persistTick, hydrated]);
+  }, [chatStore, persistTick, hydrated, workspaceId]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -515,15 +528,28 @@ export function App() {
           history: surfaceTimelineRef.current[surfaceId] ?? [],
         };
       });
-      saveSurfaces(recs).catch(() => {});
+      saveSurfaces(workspaceId, recs).catch(() => {});
     }, 1500);
     return () => clearTimeout(t);
-  }, [persistTick, liveProcessor, hydrated]);
+  }, [persistTick, liveProcessor, hydrated, workspaceId]);
 
+  // Persist per-workspace UI state (active tab + chat dock) onto the workspace record.
   useEffect(() => {
     if (!hydrated) return;
-    saveState({ activeTabId: shellState.activeTabId, chatDockState: shellState.chatDockState }).catch(() => {});
-  }, [shellState, hydrated]);
+    updateWorkspace(workspaceId, {
+      activeTabId: shellState.activeTabId ?? undefined,
+      chatDockState: shellState.chatDockState,
+    }).catch(() => {});
+  }, [shellState, hydrated, workspaceId]);
+
+  // On workspace switch (this view unmounts), abort any in-flight agent turns so
+  // their streams don't keep running against the torn-down state.
+  useEffect(() => {
+    const controllers = abortControllersRef.current;
+    return () => {
+      for (const c of controllers) c.abort();
+    };
+  }, []);
 
   // --- prompt → AG-UI stream → diff pipeline -------------------------------
   const handlePrompt = useCallback(
@@ -991,6 +1017,7 @@ export function App() {
             >
               arete
             </span>
+            {switcherSlot}
             <span style={{ color: 'var(--text-faint)', fontSize: 12, letterSpacing: 0.2 }}>
               chat · agent-mutable pages
             </span>
@@ -1037,5 +1064,85 @@ export function App() {
         />
       )}
     </MarkdownContext.Provider>
+  );
+}
+
+/**
+ * Root: owns the workspace list + the globally-active workspace, and mounts ONE
+ * <WorkspaceView> keyed by the active id. Switching the active id remounts it, so
+ * each workspace is a clean, isolated thread (its own pages/surfaces/chat). The
+ * workspace switcher is rendered here and injected into the view's top bar.
+ */
+export function App() {
+  const [workspaces, setWorkspaces] = useState<ApiWorkspace[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    const { workspaces: ws, activeWorkspaceId: active } = await loadWorkspaces();
+    setWorkspaces(ws);
+    setActiveWorkspaceId((cur) => cur ?? active ?? ws[0]?.id ?? null);
+    return ws;
+  }, []);
+
+  useEffect(() => {
+    refresh().catch(() => {});
+  }, [refresh]);
+
+  const switchWorkspace = useCallback((id: string) => {
+    setActiveWorkspaceId(id); // instant remount
+    activateWorkspace(id).catch(() => {}); // persist active (background)
+  }, []);
+
+  const handleCreate = useCallback(
+    async (name: string) => {
+      const w = await createWorkspace(name);
+      await refresh();
+      switchWorkspace(w.id);
+    },
+    [refresh, switchWorkspace],
+  );
+
+  const handleRename = useCallback(
+    async (id: string, name: string) => {
+      await updateWorkspace(id, { name });
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const handleDelete = useCallback(async (id: string) => {
+    const res = await deleteWorkspace(id).catch(() => null);
+    const { workspaces: ws } = await loadWorkspaces();
+    setWorkspaces(ws);
+    if (res?.activeWorkspaceId) setActiveWorkspaceId(res.activeWorkspaceId);
+    else setActiveWorkspaceId((cur) => (ws.some((w) => w.id === cur) ? cur : ws[0]?.id ?? null));
+  }, []);
+
+  if (!activeWorkspaceId) {
+    return (
+      <div style={{ height: '100vh', display: 'grid', placeItems: 'center', color: 'var(--text-faint, #888)' }}>
+        Loading…
+      </div>
+    );
+  }
+
+  const active = workspaces.find((w) => w.id === activeWorkspaceId);
+  return (
+    <WorkspaceView
+      key={activeWorkspaceId}
+      workspaceId={activeWorkspaceId}
+      initialActiveTabId={active?.activeTabId}
+      initialChatDockState={active?.chatDockState}
+      switcherSlot={
+        <WorkspaceSwitcher
+          workspaces={workspaces}
+          activeWorkspaceId={activeWorkspaceId}
+          onSwitch={switchWorkspace}
+          onCreate={handleCreate}
+          onRename={handleRename}
+          onDelete={handleDelete}
+        />
+      }
+    />
   );
 }

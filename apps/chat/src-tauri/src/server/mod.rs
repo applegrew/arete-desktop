@@ -33,6 +33,16 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/chat", get(routes::chat::list).post(routes::chat::save))
         .route("/api/state", get(routes::app_state::get).post(routes::app_state::post))
         .route("/api/settings", get(routes::settings::get).put(routes::settings::put))
+        // Workspaces: multiple independent chat threads, each scoping pages/surfaces/chat.
+        .route(
+            "/api/workspaces",
+            get(routes::workspaces::list).post(routes::workspaces::create),
+        )
+        .route(
+            "/api/workspaces/:id",
+            axum::routing::patch(routes::workspaces::update).delete(routes::workspaces::remove),
+        )
+        .route("/api/workspaces/:id/activate", post(routes::workspaces::activate))
         .route("/api/health", get(health))
         // Agent loop: Ollama-backed turn streamed as AG-UI SSE, MCP tools, skills.
         .route("/api/agui", post(agent::run_turn))

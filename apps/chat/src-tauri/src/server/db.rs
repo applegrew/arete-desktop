@@ -3,7 +3,12 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::{json, Map, Value};
 use std::path::Path;
 
-use super::models::{ApiChatEntry, ApiPage, ApiSurface};
+use super::models::{ApiChatEntry, ApiPage, ApiSurface, ApiWorkspace};
+
+/// Key in `app_state` holding the globally-active workspace id.
+const ACTIVE_WS_KEY: &str = "activeWorkspaceId";
+/// Id of the default workspace existing data migrates into.
+pub const DEFAULT_WS: &str = "default";
 
 /// Open the DB (creating parent dirs), enable WAL, create tables, run the
 /// icon/color migration, and seed default settings on first boot.
@@ -28,7 +33,12 @@ pub fn init(path: &Path) -> Result<Connection> {
          CREATE TABLE IF NOT EXISTS chat_entries (
             id TEXT PRIMARY KEY, role TEXT NOT NULL, text TEXT, surface_id TEXT, created_at INTEGER NOT NULL
          );
-         CREATE TABLE IF NOT EXISTS app_state ( k TEXT PRIMARY KEY, v TEXT NOT NULL );",
+         CREATE TABLE IF NOT EXISTS app_state ( k TEXT PRIMARY KEY, v TEXT NOT NULL );
+         CREATE TABLE IF NOT EXISTS workspaces (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL,
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+            active_tab_id TEXT, chat_dock_state TEXT
+         );",
     )?;
 
     // Migration: add icon + color columns for databases created before they existed.
@@ -45,12 +55,37 @@ pub fn init(path: &Path) -> Result<Connection> {
     if !table_has_column(&conn, "surfaces", "history_json")? {
         conn.execute_batch("ALTER TABLE surfaces ADD COLUMN history_json TEXT")?;
     }
+    // Migration: scope content by workspace. Existing rows default into the default
+    // workspace, so the whole current thread becomes "Workspace 1" with no data loss.
+    for tbl in ["pages", "surfaces", "chat_entries"] {
+        if !table_has_column(&conn, tbl, "workspace_id")? {
+            conn.execute_batch(&format!(
+                "ALTER TABLE {tbl} ADD COLUMN workspace_id TEXT NOT NULL DEFAULT '{DEFAULT_WS}'"
+            ))?;
+        }
+    }
 
     // First-boot seed so partial settings saves still yield a complete object.
     if get_settings(&conn)?.is_none() {
         let defaults = super::settings::default_settings();
         if let Value::Object(map) = defaults {
             save_settings(&conn, &map)?;
+        }
+    }
+
+    // Seed a default workspace (existing data already defaults into it) + an active id.
+    if count_workspaces(&conn)? == 0 {
+        let now = now_ms();
+        conn.execute(
+            "INSERT INTO workspaces (id, name, position, created_at, updated_at, active_tab_id, chat_dock_state)
+             VALUES (?1, 'Workspace 1', 0, ?2, ?2, 'chat', 'dock')",
+            params![DEFAULT_WS, now],
+        )?;
+    }
+    if get_active_workspace_id(&conn)?.is_none() {
+        let first = list_workspaces(&conn)?.first().map(|w| w.id.clone());
+        if let Some(id) = first {
+            set_active_workspace_id(&conn, &id)?;
         }
     }
 
@@ -91,16 +126,19 @@ fn row_to_page(r: &Row) -> rusqlite::Result<ApiPage> {
         position: r.get(6)?,
         created_at: r.get(7)?,
         updated_at: r.get(8)?,
+        workspace_id: r.get(9)?,
     })
 }
 
 const PAGE_COLS: &str =
-    "id, title, icon, color, layout_json, mapping_json, position, created_at, updated_at";
+    "id, title, icon, color, layout_json, mapping_json, position, created_at, updated_at, workspace_id";
 
-pub fn list_pages(conn: &Connection) -> Result<Vec<ApiPage>> {
-    let sql = format!("SELECT {PAGE_COLS} FROM pages ORDER BY position ASC, created_at ASC");
+pub fn list_pages(conn: &Connection, ws: &str) -> Result<Vec<ApiPage>> {
+    let sql = format!(
+        "SELECT {PAGE_COLS} FROM pages WHERE workspace_id = ?1 ORDER BY position ASC, created_at ASC"
+    );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([], row_to_page)?;
+    let rows = stmt.query_map([ws], row_to_page)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
@@ -110,20 +148,20 @@ pub fn get_page(conn: &Connection, id: &str) -> Result<Option<ApiPage>> {
     Ok(stmt.query_row([id], row_to_page).optional()?)
 }
 
-pub fn count_pages(conn: &Connection) -> Result<i64> {
-    Ok(conn.query_row("SELECT COUNT(*) FROM pages", [], |r| r.get(0))?)
+pub fn count_pages(conn: &Connection, ws: &str) -> Result<i64> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM pages WHERE workspace_id = ?1", [ws], |r| r.get(0))?)
 }
 
 pub fn upsert_page(conn: &Connection, p: &ApiPage) -> Result<()> {
     let layout = serde_json::to_string(&p.layout)?;
     let mapping = serde_json::to_string(&p.mapping)?;
     conn.execute(
-        "INSERT INTO pages (id, title, icon, color, layout_json, mapping_json, position, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO pages (id, title, icon, color, layout_json, mapping_json, position, created_at, updated_at, workspace_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT(id) DO UPDATE SET title=excluded.title, icon=excluded.icon, color=excluded.color,
            layout_json=excluded.layout_json, mapping_json=excluded.mapping_json,
            position=excluded.position, updated_at=excluded.updated_at",
-        params![p.id, p.title, p.icon, p.color, layout, mapping, p.position, p.created_at, p.updated_at],
+        params![p.id, p.title, p.icon, p.color, layout, mapping, p.position, p.created_at, p.updated_at, p.workspace_id],
     )?;
     Ok(())
 }
@@ -135,11 +173,11 @@ pub fn delete_page(conn: &Connection, id: &str) -> Result<()> {
 
 // ---- surfaces ------------------------------------------------------------
 
-pub fn list_surfaces(conn: &Connection) -> Result<Vec<ApiSurface>> {
+pub fn list_surfaces(conn: &Connection, ws: &str) -> Result<Vec<ApiSurface>> {
     let mut stmt = conn.prepare(
-        "SELECT surface_id, components_json, data_model_json, updated_at, handlers_json, history_json FROM surfaces",
+        "SELECT surface_id, components_json, data_model_json, updated_at, handlers_json, history_json FROM surfaces WHERE workspace_id = ?1",
     )?;
-    let rows = stmt.query_map([], |r| {
+    let rows = stmt.query_map([ws], |r| {
         let comp: String = r.get(1)?;
         let dm: String = r.get(2)?;
         let handlers: Option<String> = r.get(4)?;
@@ -156,14 +194,14 @@ pub fn list_surfaces(conn: &Connection) -> Result<Vec<ApiSurface>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-pub fn replace_surfaces(conn: &mut Connection, surfaces: &[ApiSurface]) -> Result<()> {
+pub fn replace_surfaces(conn: &mut Connection, ws: &str, surfaces: &[ApiSurface]) -> Result<()> {
     let now = now_ms();
     let tx = conn.transaction()?;
-    tx.execute("DELETE FROM surfaces", [])?;
+    tx.execute("DELETE FROM surfaces WHERE workspace_id = ?1", [ws])?;
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO surfaces (surface_id, components_json, data_model_json, updated_at, handlers_json, history_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT OR REPLACE INTO surfaces (surface_id, components_json, data_model_json, updated_at, handlers_json, history_json, workspace_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?;
         for s in surfaces {
             let comp = serde_json::to_string(&s.components)?;
@@ -171,7 +209,7 @@ pub fn replace_surfaces(conn: &mut Connection, surfaces: &[ApiSurface]) -> Resul
             let handlers = serde_json::to_string(&s.handlers)?;
             let history = serde_json::to_string(&s.history)?;
             let updated = if s.updated_at == 0 { now } else { s.updated_at };
-            stmt.execute(params![s.surface_id, comp, dm, updated, handlers, history])?;
+            stmt.execute(params![s.surface_id, comp, dm, updated, handlers, history, ws])?;
         }
     }
     tx.commit()?;
@@ -180,11 +218,11 @@ pub fn replace_surfaces(conn: &mut Connection, surfaces: &[ApiSurface]) -> Resul
 
 // ---- chat ----------------------------------------------------------------
 
-pub fn get_chat(conn: &Connection) -> Result<Vec<ApiChatEntry>> {
+pub fn get_chat(conn: &Connection, ws: &str) -> Result<Vec<ApiChatEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT id, role, text, surface_id, created_at FROM chat_entries ORDER BY created_at ASC",
+        "SELECT id, role, text, surface_id, created_at FROM chat_entries WHERE workspace_id = ?1 ORDER BY created_at ASC",
     )?;
-    let rows = stmt.query_map([], |r| {
+    let rows = stmt.query_map([ws], |r| {
         Ok(ApiChatEntry {
             id: r.get(0)?,
             role: r.get(1)?,
@@ -196,16 +234,16 @@ pub fn get_chat(conn: &Connection) -> Result<Vec<ApiChatEntry>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-pub fn save_chat(conn: &mut Connection, entries: &[ApiChatEntry]) -> Result<()> {
+pub fn save_chat(conn: &mut Connection, ws: &str, entries: &[ApiChatEntry]) -> Result<()> {
     let tx = conn.transaction()?;
-    tx.execute("DELETE FROM chat_entries", [])?;
+    tx.execute("DELETE FROM chat_entries WHERE workspace_id = ?1", [ws])?;
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO chat_entries (id, role, text, surface_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT OR REPLACE INTO chat_entries (id, role, text, surface_id, created_at, workspace_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
         for e in entries {
-            stmt.execute(params![e.id, e.role, e.text, e.surface_id, e.created_at])?;
+            stmt.execute(params![e.id, e.role, e.text, e.surface_id, e.created_at, ws])?;
         }
     }
     tx.commit()?;
@@ -259,6 +297,107 @@ pub fn save_settings(conn: &Connection, patch: &Map<String, Value>) -> Result<()
     conn.execute(
         "INSERT INTO app_state (k, v) VALUES ('settings', ?1) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
         params![s],
+    )?;
+    Ok(())
+}
+
+// ---- workspaces ----------------------------------------------------------
+
+const WS_COLS: &str =
+    "id, name, position, created_at, updated_at, active_tab_id, chat_dock_state";
+
+fn row_to_workspace(r: &Row) -> rusqlite::Result<ApiWorkspace> {
+    Ok(ApiWorkspace {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        position: r.get(2)?,
+        created_at: r.get(3)?,
+        updated_at: r.get(4)?,
+        active_tab_id: r.get(5)?,
+        chat_dock_state: r.get(6)?,
+    })
+}
+
+pub fn list_workspaces(conn: &Connection) -> Result<Vec<ApiWorkspace>> {
+    let sql = format!("SELECT {WS_COLS} FROM workspaces ORDER BY position ASC, created_at ASC");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], row_to_workspace)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub fn get_workspace(conn: &Connection, id: &str) -> Result<Option<ApiWorkspace>> {
+    let sql = format!("SELECT {WS_COLS} FROM workspaces WHERE id = ?1");
+    let mut stmt = conn.prepare(&sql)?;
+    Ok(stmt.query_row([id], row_to_workspace).optional()?)
+}
+
+pub fn count_workspaces(conn: &Connection) -> Result<i64> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM workspaces", [], |r| r.get(0))?)
+}
+
+/// Create a workspace (empty: no pages/surfaces/chat). `id` is caller-supplied.
+pub fn create_workspace(conn: &Connection, id: &str, name: &str) -> Result<ApiWorkspace> {
+    let now = now_ms();
+    let position = count_workspaces(conn)?;
+    conn.execute(
+        "INSERT INTO workspaces (id, name, position, created_at, updated_at, active_tab_id, chat_dock_state)
+         VALUES (?1, ?2, ?3, ?4, ?4, 'chat', 'dock')",
+        params![id, name, position, now],
+    )?;
+    Ok(get_workspace(conn, id)?.expect("just inserted"))
+}
+
+/// Patch present fields (rename / persist per-workspace UI state). Returns the updated row.
+pub fn update_workspace(
+    conn: &Connection,
+    id: &str,
+    name: Option<&str>,
+    active_tab_id: Option<&str>,
+    chat_dock_state: Option<&str>,
+) -> Result<Option<ApiWorkspace>> {
+    let mut cur = match get_workspace(conn, id)? {
+        Some(w) => w,
+        None => return Ok(None),
+    };
+    if let Some(n) = name {
+        cur.name = n.to_string();
+    }
+    if let Some(t) = active_tab_id {
+        cur.active_tab_id = Some(t.to_string());
+    }
+    if let Some(d) = chat_dock_state {
+        cur.chat_dock_state = Some(d.to_string());
+    }
+    conn.execute(
+        "UPDATE workspaces SET name=?2, active_tab_id=?3, chat_dock_state=?4, updated_at=?5 WHERE id=?1",
+        params![id, cur.name, cur.active_tab_id, cur.chat_dock_state, now_ms()],
+    )?;
+    get_workspace(conn, id)
+}
+
+/// Delete a workspace and ALL its content (pages, surfaces, chat).
+pub fn delete_workspace(conn: &mut Connection, id: &str) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM pages WHERE workspace_id = ?1", [id])?;
+    tx.execute("DELETE FROM surfaces WHERE workspace_id = ?1", [id])?;
+    tx.execute("DELETE FROM chat_entries WHERE workspace_id = ?1", [id])?;
+    tx.execute("DELETE FROM workspaces WHERE id = ?1", [id])?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn get_active_workspace_id(conn: &Connection) -> Result<Option<String>> {
+    let raw: Option<String> = conn
+        .query_row("SELECT v FROM app_state WHERE k = ?1", [ACTIVE_WS_KEY], |r| r.get(0))
+        .optional()?;
+    // Stored as a JSON string; fall back to the raw value.
+    Ok(raw.map(|s| serde_json::from_str::<String>(&s).unwrap_or(s)))
+}
+
+pub fn set_active_workspace_id(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO app_state (k, v) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+        params![ACTIVE_WS_KEY, serde_json::to_string(id)?],
     )?;
     Ok(())
 }
