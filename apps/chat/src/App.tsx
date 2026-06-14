@@ -803,6 +803,8 @@ export function App() {
           },
           tools,
         });
+        // Muted breadcrumb: a learned handler short-circuited this action (no LLM).
+        chatStore.push({ role: 'system', text: `⚡ Auto-handled "${action.name}" with a learned script — no agent turn.` });
       } catch (err) {
         if (!controller.signal.aborted) {
           const msg = (err as Error).message;
