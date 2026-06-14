@@ -796,6 +796,9 @@ export function App() {
         {},
         { get: (_t, name: string) => (args?: unknown) => callMcpTool(name, args, controller.signal) },
       ) as Record<string, (args?: unknown) => Promise<unknown>>;
+      // Live indicator: a pending breadcrumb (animated) so the user can see the script
+      // is RUNNING (its tool calls hit the network); updated to a done state on success.
+      const pendingEntry = chatStore.push({ role: 'system', text: `Auto-handling "${action.name}"`, pending: true });
       try {
         await runClientHandler(handler.code, action.context ?? {}, buildSurfacePayload(surfaceId), {
           render: (target, comps) => {
@@ -804,8 +807,11 @@ export function App() {
           },
           tools,
         });
-        // Muted breadcrumb: a learned handler short-circuited this action (no LLM).
-        chatStore.push({ role: 'system', text: `⚡ Auto-handled "${action.name}" with a learned script — no agent turn.` });
+        // Done: settle the breadcrumb (no longer pending/animated).
+        chatStore.update(pendingEntry.id, {
+          text: `⚡ Auto-handled "${action.name}" with a learned script — no agent turn.`,
+          pending: false,
+        });
         // The handler may run WITHOUT throwing yet still render a structurally-broken
         // surface (e.g. a DataTable whose data came out undefined → empty, no pages).
         // Components report an error-severity diagnostic for that; detect it after the
@@ -826,6 +832,7 @@ export function App() {
           void handlePromptRef.current(buildActionSynth(action, 1), true);
         }, 0);
       } catch (err) {
+        chatStore.remove(pendingEntry.id); // drop the in-progress indicator
         if (!controller.signal.aborted) {
           const msg = err instanceof Error ? err.message : String(err);
           chatStore.push({ role: 'system', text: `Widget action failed: ${msg}` });

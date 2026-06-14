@@ -71,13 +71,38 @@ export function streamAgent(
  * MCP transport, and result parsing stay server-side. Parses the result text as JSON
  * (the common case), falling back to the raw string. Throws on tool error.
  */
+const TOOL_TIMEOUT_MS = 30_000;
+
 export async function callMcpTool(name: string, args: unknown, signal?: AbortSignal): Promise<unknown> {
-  const res = await fetch(`${apiOrigin()}/api/mcp-call`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, args: args ?? {} }),
-    signal,
-  });
+  // Bound the call: a hung MCP server must NOT hang the widget handler forever
+  // (which would freeze the per-surface action queue + stick the busy state). Time
+  // out at 30s; also honor the caller's cancel signal.
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort();
+  if (signal) {
+    if (signal.aborted) ctrl.abort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort();
+  }, TOOL_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${apiOrigin()}/api/mcp-call`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, args: args ?? {} }),
+      signal: ctrl.signal,
+    });
+  } catch (err) {
+    if (timedOut) throw new Error(`tool ${name} timed out after ${TOOL_TIMEOUT_MS / 1000}s`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
   if (!res.ok) throw new Error(`tool ${name} failed: ${res.status} ${res.statusText}`);
   const { text, isError } = (await res.json()) as { text?: string; isError?: boolean };
   if (isError) throw new Error(text || `tool ${name} returned an error`);
