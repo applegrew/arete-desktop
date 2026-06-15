@@ -6,6 +6,7 @@ import { InputText } from 'primereact/inputtext';
 import { InputTextarea } from 'primereact/inputtextarea';
 import { Checkbox } from 'primereact/checkbox';
 import { Dropdown } from 'primereact/dropdown';
+import { Editor } from 'primereact/editor';
 import { Button } from 'primereact/button';
 import { useAction, useReportDiagnostics, type DiagnosticInput } from '@arete-desktop/core';
 
@@ -26,8 +27,9 @@ const fieldSchema = z.object({
   name: z.string(),
   /** Display label (defaults to `name`). */
   label: z.string().optional(),
-  /** Input kind (editable mode). Defaults to "text". */
-  type: z.enum(['text', 'number', 'longText', 'obscured', 'checkbox', 'select']).optional(),
+  /** Input kind (editable mode). Defaults to "text". "richText" is a WYSIWYG editor
+   *  whose value is an HTML string. */
+  type: z.enum(['text', 'number', 'longText', 'richText', 'obscured', 'checkbox', 'select']).optional(),
   /** Initial value. */
   value: z.unknown().optional(),
   placeholder: z.string().optional(),
@@ -136,6 +138,15 @@ export const Form = createComponentImplementation(FormApi, ({ props, context }) 
         const val = values[f.name];
 
         if (readOnly) {
+          // Rich text renders its HTML via Quill (read-only) — not raw innerHTML.
+          if (f.type === 'richText') {
+            return (
+              <div key={f.name} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={helpStyle}>{label}</span>
+                <Editor value={typeof val === 'string' ? val : ''} readOnly showHeader={false} style={{ border: 'none' }} />
+              </div>
+            );
+          }
           return (
             <div key={f.name} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span style={helpStyle}>{label}</span>
@@ -147,7 +158,13 @@ export const Form = createComponentImplementation(FormApi, ({ props, context }) 
         return (
           <div key={f.name} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {f.type !== 'checkbox' && <label style={labelStyle}>{label}</label>}
-            {f.type === 'longText' ? (
+            {f.type === 'richText' ? (
+              <Editor
+                value={typeof val === 'string' ? val : ''}
+                onTextChange={(e) => setField(f.name, e.htmlValue ?? '')}
+                style={{ height: 180 }}
+              />
+            ) : f.type === 'longText' ? (
               <InputTextarea
                 value={typeof val === 'string' ? val : String(val ?? '')}
                 placeholder={f.placeholder}
