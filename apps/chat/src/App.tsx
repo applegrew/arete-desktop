@@ -622,7 +622,6 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
       try {
         await streamAgent(text, priorMessages, agentContext, {
           onToolCallStart: ({ toolCallName, toolCallId }) => {
-            clearAsking();
             chatStore.push({ role: 'tool', toolName: toolCallName, id: toolCallId });
           },
           onToolResult: ({ toolCallId, content, isError }) => {
@@ -658,7 +657,12 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
               // surfaces (createSurface) render straight into the chat scroll.
               const isModification = isExisting && !hasCreate;
               if (diffsGated && isModification && !fromUserAction) router.gateSurface(targetId);
-              captureSurfaceContents(messages);
+              // Only capture components that are applied to the LIVE model (not gated to
+              // shadow). Otherwise the agent context shows gated changes as "already present"
+              // and the validator marks re-emits as no-ops — but the user hasn't approved yet.
+              if (!(diffsGated && isModification && !fromUserAction)) {
+                captureSurfaceContents(messages);
+              }
               // User-action edits apply straight to live even if the target surface is
               // gated (e.g. pinned) — those changes are the user's own doing.
               router.route(messages as never, { bypassGate: fromUserAction });
@@ -667,7 +671,7 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
               if (targetId && !(diffsGated && isModification && !fromUserAction)) {
                 recordTimelineRef.current(targetId, fromUserAction ? 'user-action' : 'agent');
               }
-              chatStore.push({ role: 'agent', surfaceId: targetId });
+              chatStore.upsertSurface(targetId, { role: 'agent' });
             } else if (emission.kind === 'pageOp') {
               const op = emission.op as { name?: string; pageId?: string; title?: string; icon?: string; color?: string; layout?: LayoutDescriptor };
               if (!op || typeof op.name !== 'string') {
@@ -894,11 +898,12 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
       // copy with a compact "moved to <page>" placeholder that locates it.
       const hostPage = pages.find((p) => Object.prototype.hasOwnProperty.call(p.mapping, surfaceId));
       if (hostPage) {
+        const hasPendingDiff = router.hasPending(surfaceId);
         return (
           <button
             type="button"
             onClick={() => locateSurface(surfaceId, hostPage.id)}
-            title={`Show on ${hostPage.title}`}
+            title={`Show on ${hostPage.title}${hasPendingDiff ? ' — pending changes need approval' : ''}`}
             style={{
               marginTop: 8,
               width: '100%',
@@ -906,8 +911,10 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
               display: 'flex',
               alignItems: 'center',
               gap: 8,
-              background: 'rgba(124,131,255,0.10)',
-              border: '1px dashed var(--glass-border-2, rgba(124,131,255,0.35))',
+              background: hasPendingDiff ? 'rgba(251,191,36,0.12)' : 'rgba(124,131,255,0.10)',
+              border: hasPendingDiff
+                ? '1.5px solid rgba(251,191,36,0.5)'
+                : '1px dashed var(--glass-border-2, rgba(124,131,255,0.35))',
               borderRadius: 12,
               padding: '10px 12px',
               color: 'var(--text-dim)',
@@ -915,12 +922,19 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
               fontSize: 12.5,
             }}
           >
-            <span aria-hidden style={{ fontSize: 14 }}>📌</span>
+            <span aria-hidden style={{ fontSize: 14 }}>{hasPendingDiff ? '🟡' : '📌'}</span>
             <span>
-              Moved to <strong style={{ color: 'var(--text)' }}>{hostPage.icon || '📄'} {hostPage.title}</strong>
+              {hasPendingDiff ? (
+                <><strong style={{ color: '#fbbf24' }}>Review changes</strong> on </>
+              ) : (
+                'Moved to '
+              )}
+              <strong style={{ color: 'var(--text)' }}>{hostPage.icon || '📄'} {hostPage.title}</strong>
             </span>
             <span style={{ flex: 1 }} />
-            <span style={{ color: 'var(--accent-2, #22d3ee)' }}>Show ↗</span>
+            <span style={{ color: hasPendingDiff ? '#fbbf24' : 'var(--accent-2, #22d3ee)' }}>
+              {hasPendingDiff ? 'Review ↗' : 'Show ↗'}
+            </span>
           </button>
         );
       }

@@ -82,6 +82,30 @@ export class ChatStore {
     this.emit();
   }
 
+  /** Move an existing surface entry to the end of the list (or push a new one). Returns the entry. */
+  upsertSurface(surfaceId: string, patch: Omit<ChatEntry, 'id' | 'createdAt' | 'surfaceId'>): ChatEntry {
+    const idx = this.entries.findIndex((e) => e.surfaceId === surfaceId);
+    if (idx >= 0) {
+      const e = this.entries[idx]!;
+      const moved: ChatEntry = {
+        id: e.id,
+        role: patch.role,
+        text: patch.text,
+        surfaceId,
+        toolName: patch.toolName,
+        toolResult: patch.toolResult,
+        toolError: patch.toolError,
+        actionLabel: patch.actionLabel,
+        pending: patch.pending,
+        createdAt: Date.now(),
+      };
+      this.entries = [...this.entries.slice(0, idx), ...this.entries.slice(idx + 1), moved];
+      this.emit();
+      return moved;
+    }
+    return this.push({ ...patch, surfaceId });
+  }
+
   clear(): void {
     this.entries = [];
     this.emit();

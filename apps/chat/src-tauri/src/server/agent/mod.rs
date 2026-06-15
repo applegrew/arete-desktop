@@ -92,16 +92,8 @@ pub async fn run_turn(State(st): State<AppState>, Json(body): Json<Value>) -> Re
         let sink = Sink::new(tx);
         sink.run_started(&thread_id, &run_id).await;
 
-        match run_agent_turn(&st, &body, &ollama).await {
+        match run_agent_turn(&st, &body, &ollama, &sink).await {
             Ok(outcome) => {
-                // Tool calls (via MCP) → native AG-UI tool-call events, before text.
-                for tc in &outcome.tool_calls {
-                    sink.tool_call_start(&tc.id, &tc.name).await;
-                    if let Some(result) = &tc.result {
-                        sink.tool_call_result(&tc.id, result, tc.is_error).await;
-                    }
-                    sink.tool_call_end(&tc.id).await;
-                }
                 if let Some(rationale) = &outcome.rationale {
                     sink.emit_text(&format!("thinking:{run_id}"), rationale, "assistant").await;
                 }

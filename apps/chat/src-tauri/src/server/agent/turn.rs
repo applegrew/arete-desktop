@@ -7,6 +7,7 @@ use super::ollama::Ollama;
 use super::prompt::build_system_prompt;
 use super::schema::envelope_schema;
 use super::skills::{load_skills, render_skills_for_prompt};
+use super::sse::Sink;
 use crate::server::state::AppState;
 
 /// Max corrective re-asks (shared budget across parse + domain failures).
@@ -15,20 +16,11 @@ const MAX_CORRECTIONS: usize = 2;
 const MAX_TOOL_ROUNDS: usize = 4;
 const BASIC_CATALOG_ID: &str = "https://a2ui.org/specification/v0_9/basic_catalog.json";
 
-/// A tool the agent called during a turn (surfaced as AG-UI TOOL_CALL events).
-pub struct ToolCallRecord {
-    pub id: String,
-    pub name: String,
-    pub result: Option<String>,
-    pub is_error: bool,
-}
-
 /// A successful turn's result (mirrors AgentOutcome::ok).
 pub struct Outcome {
     pub validated: Vec<Value>,
     pub rationale: Option<String>,
     pub reply: Option<String>,
-    pub tool_calls: Vec<ToolCallRecord>,
 }
 
 /// Error: (http status, body). Mirrors AgentOutcome::err.
@@ -40,6 +32,7 @@ pub async fn run_agent_turn(
     state: &AppState,
     body: &Value,
     ollama: &Ollama,
+    sink: &Sink,
 ) -> Result<Outcome, TurnError> {
     let prompt = body.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
     if prompt.is_empty() {
@@ -79,25 +72,19 @@ pub async fn run_agent_turn(
     convo.push(json!({ "role": "user", "content": prompt }));
 
     // MCP tool pre-step (failure-tolerant; skipped when no tools).
-    let mut tool_calls: Vec<ToolCallRecord> = Vec::new();
     let mut ui_resources: Vec<McpUiResource> = Vec::new();
     if !tool_infos.is_empty() {
-        pre_step(state, ollama, &tool_infos, ctx, &mut convo, &mut tool_calls, &mut ui_resources).await;
+        pre_step(state, ollama, &tool_infos, ctx, &mut convo, sink, &mut ui_resources).await;
     }
 
     match run_with_correction(ollama, convo, ctx).await {
         Ok(mut outcome) => {
-            // Widget handler scripts are validated client-side (the webview parses
-            // them via `new Function` before registering) — no server compile-check.
-
             // Render captured MCP-UI resources as their own surfaces (framework-driven).
             for r in &ui_resources {
                 outcome.validated.push(build_embed_emission(r));
             }
-            outcome.tool_calls = tool_calls;
             log_llm(json!({
                 "phase": "turn.ok", "emissions": outcome.validated.len(),
-                "toolCalls": outcome.tool_calls.len(), "uiResources": ui_resources.len(),
             }));
             Ok(outcome)
         }
@@ -109,15 +96,16 @@ pub async fn run_agent_turn(
 }
 
 /// Let the model call MCP tools (multi-step) before the envelope step. Any error
-/// skips the pre-step cleanly (matches `run-turn.ts`).
+/// skips the pre-step cleanly. Tool call events are streamed to the client immediately
+/// so the UI shows them incrementally, rather than all at once after the turn completes.
 async fn pre_step(
     state: &AppState,
     ollama: &Ollama,
     tool_infos: &[Value],
     ctx: &Value,
     convo: &mut Vec<Value>,
-    tool_calls: &mut Vec<ToolCallRecord>,
-    ui: &mut Vec<McpUiResource>,
+    sink: &Sink,
+    ui_resources: &mut Vec<McpUiResource>,
 ) {
     for _ in 0..MAX_TOOL_ROUNDS {
         let step = match ollama.chat_with_tools(convo, tool_infos).await {
@@ -133,6 +121,8 @@ async fn pre_step(
         }
         convo.push(step.message); // assistant message carrying the tool_calls
         for tc in step.tool_calls {
+            // Stream tool call events immediately so the UI sees them as they happen.
+            sink.tool_call_start(&tc.id, &tc.name).await;
             // Built-in tools resolve locally against the turn's context (no MCP).
             let outcome = if tc.name == "getSurfaceHistory" {
                 get_surface_history(ctx, &tc.arguments)
@@ -140,14 +130,10 @@ async fn pre_step(
                 mcp::call(state, &tc.name, tc.arguments.clone()).await
             };
             log_llm(json!({ "phase": "prestep.tool", "tool": tc.name, "isError": outcome.is_error }));
-            convo.push(json!({ "role": "tool", "content": outcome.text.clone(), "tool_name": tc.name.clone() }));
-            tool_calls.push(ToolCallRecord {
-                id: tc.id,
-                name: tc.name,
-                result: Some(outcome.text),
-                is_error: outcome.is_error,
-            });
-            ui.extend(outcome.ui);
+            sink.tool_call_result(&tc.id, &outcome.text, outcome.is_error).await;
+            sink.tool_call_end(&tc.id).await;
+            convo.push(json!({ "role": "tool", "content": outcome.text.clone(), "tool_name": tc.name.clone()}));
+            ui_resources.extend(outcome.ui);
         }
     }
 }
@@ -297,7 +283,6 @@ async fn run_with_correction(
                 validated: cleaned,
                 rationale: env_str(&envelope, "rationale"),
                 reply: env_str(&envelope, "reply"),
-                tool_calls: Vec::new(),
             });
         }
 
@@ -305,7 +290,6 @@ async fn run_with_correction(
             validated: result.validated,
             rationale: env_str(&envelope, "rationale"),
             reply: env_str(&envelope, "reply"),
-            tool_calls: Vec::new(),
         });
     }
 }
