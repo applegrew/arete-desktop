@@ -87,6 +87,32 @@ function sameUserAction(a: UserAction, b: UserAction): boolean {
 }
 
 /**
+ * Compact, depth-limited description of a value's SHAPE (keys/types, not values).
+ * When a widget handler throws, we feed this back to the agent so it can see what a
+ * tool ACTUALLY returned — the usual cause of handler bugs is a wrong assumption
+ * about the result shape (e.g. reading `t.data.tickets` when the tool returns
+ * `{ results: [...] }`), which the agent otherwise can't observe.
+ */
+function describeShape(v: unknown, depth = 0): string {
+  if (v === null) return 'null';
+  if (v === undefined) return 'undefined';
+  if (Array.isArray(v)) {
+    if (v.length === 0) return 'array(0)';
+    return `array(${v.length}) of ${depth < 2 ? describeShape(v[0], depth + 1) : '…'}`;
+  }
+  if (typeof v === 'object') {
+    const keys = Object.keys(v as Record<string, unknown>);
+    if (depth >= 2) return `{ …${keys.length} keys }`;
+    const shown = keys.slice(0, 12);
+    const body = shown
+      .map((k) => `${k}: ${describeShape((v as Record<string, unknown>)[k], depth + 1)}`)
+      .join(', ');
+    return `{ ${body}${keys.length > shown.length ? `, …${keys.length - shown.length} more` : ''} }`;
+  }
+  return typeof v;
+}
+
+/**
  * One workspace's full state + UI. Keyed by `workspaceId` in <App>, so switching
  * workspaces REMOUNTS this fresh — all singletons/refs re-initialize and the
  * hydration effect reloads for the new workspace. No manual cross-workspace reset.
@@ -362,6 +388,19 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
               ? `Applied changes to ${deriveSurfaceLabel(router.getLiveSurface(d.surfaceId))}.`
               : `approved ${d.op.name}`,
         });
+        if (d.kind === 'content') {
+          // Approving a gated diff commits the buffered messages straight into the
+          // live model — but surfaceContentsRef + the timeline are only fed by the
+          // emission/handler paths, so without this they keep the PRE-approval spec.
+          // That stale snapshot is what `back`/restore (and the agent's context) read,
+          // so e.g. an approved Chart `action` would vanish on restore. Re-snapshot
+          // from the now-committed live surface so restores and context stay accurate.
+          const committed = router.liveComponents(d.surfaceId);
+          if (committed) {
+            surfaceContentsRef.current[d.surfaceId] = committed;
+            recordTimelineRef.current(d.surfaceId, 'agent');
+          }
+        }
         if (d.kind === 'page-op') {
           // A batch may pin/place several surfaces. Track each surface placed on a
           // page so future agent edits to it are gated; the chat entry stays and
@@ -678,10 +717,20 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
                 // Malformed op (e.g. empty {}) — never route it (would switch to a
                 // non-existent tab); tell the user instead of failing silently.
                 chatStore.push({ role: 'system', text: 'Agent emitted an invalid page operation — ignored.' });
-              } else if (op.name === 'createPage') {
-                createPageLocal({ id: op.pageId, title: op.title, layout: op.layout, icon: op.icon, color: op.color });
-              } else if (op.name === 'deletePage' && op.pageId) {
-                deletePageLocal(op.pageId);
+              } else if (op.name === 'createPage' || op.name === 'deletePage') {
+                // Page lifecycle (create/delete tabs) is a USER-only action — the agent
+                // has no way to add or remove pages. Refuse the op and feed the refusal
+                // back to the agent so it re-plans onto an existing page or the chat.
+                chatStore.push({
+                  role: 'system',
+                  text: `Agent tried to ${op.name === 'createPage' ? 'create' : 'delete'} a page — not allowed. Only the user can add or remove pages.`,
+                });
+                pageOpErrorsRef.current.push({
+                  surfaceId: undefined,
+                  severity: 'error',
+                  code: `pageop.${op.name}.forbidden`,
+                  message: `"${op.name}" is not available to the agent — only the user can create or delete pages. Place surfaces on an EXISTING page (setPageRegion/pinSurface/moveSurface) or leave them in the chat scroll instead.`,
+                });
               } else if (op.name === 'setPageProps' && op.pageId) {
                 const patch: Record<string, unknown> = {};
                 if (op.title !== undefined) patch.title = op.title;
@@ -822,10 +871,26 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
       const controller = new AbortController();
       abortControllersRef.current.add(controller);
       setBusyCount((c) => c + 1);
+      // Record the SHAPE of each tool's result as the handler runs, so a failure can
+      // tell the agent what the tool actually returned (the agent never sees tool
+      // OUTPUT schemas, so it guesses field paths — the #1 source of handler bugs).
+      const toolShapes = new Map<string, string>();
       const tools = new Proxy(
         {},
-        { get: (_t, name: string) => (args?: unknown) => callMcpTool(name, args, controller.signal) },
+        {
+          get: (_t, name: string) => async (args?: unknown) => {
+            const result = await callMcpTool(name, args, controller.signal);
+            toolShapes.set(name, describeShape(result));
+            return result;
+          },
+        },
       ) as Record<string, (args?: unknown) => Promise<unknown>>;
+      const toolShapeHint = () =>
+        toolShapes.size
+          ? ` The tools it called returned these shapes (read fields accordingly): ${[...toolShapes]
+              .map(([n, s]) => `${n} → ${s}`)
+              .join('; ')}.`
+          : '';
       // Live indicator: a pending breadcrumb (animated) so the user can see the script
       // is RUNNING (its tool calls hit the network); updated to a done state on success.
       const pendingEntry = chatStore.push({ role: 'system', text: `Auto-handling "${action.name}"`, pending: true });
@@ -858,7 +923,14 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
             text: `The "${ev}" script ran but rendered a broken surface (${errs[0]?.message ?? 'render error'}) — asking the agent to fix it.`,
           });
           // renderDiagnostics are already folded into the next turn's context, so the
-          // agent sees the specifics and can re-emit a corrected handler.
+          // agent sees the specifics and can re-emit a corrected handler. Add the tool
+          // result shapes so it can see whether it read the wrong field path.
+          pageOpErrorsRef.current.push({
+            surfaceId: sid,
+            severity: 'error',
+            code: `widget.${ev}.broken-render`,
+            message: `The "${ev}" handler ran but produced a broken surface (${errs[0]?.message ?? 'render error'}).${toolShapeHint()} Re-emit a corrected widgetScript handler for "${ev}" that reads the fields shown above.`,
+          });
           void handlePromptRef.current(buildActionSynth(action, 1), true);
         }, 0);
       } catch (err) {
@@ -867,13 +939,14 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
           const msg = err instanceof Error ? err.message : String(err);
           chatStore.push({ role: 'system', text: `Widget action failed: ${msg}` });
           // Feed the runtime failure back to the agent so the fallback turn can
-          // re-emit a CORRECTED handler (e.g. the tool args were wrong — cursor-based
-          // tools need the cursor token from a prior response, not a row offset).
+          // re-emit a CORRECTED handler. The usual cause is a wrong assumption about a
+          // tool's RESULT shape (reading the wrong field path) — so include the shapes
+          // the tools actually returned this run, which the agent can't otherwise see.
           pageOpErrorsRef.current.push({
             surfaceId,
             severity: 'error',
             code: `widget.${action.name}.failed`,
-            message: `The attached "${action.name}" handler failed at runtime: ${msg}. Tool arguments must match the tool's input schema. Handle this action now AND re-emit a corrected widgetScript handler for "${action.name}" so it works next time.`,
+            message: `The attached "${action.name}" handler threw at runtime: ${msg}. This is usually a wrong field path on a tool's result or a missing null-check.${toolShapeHint()} Handle this action now AND re-emit a corrected widgetScript handler for "${action.name}" that reads the fields shown above so it works next time.`,
           });
           await handlePromptRef.current(buildActionSynth(action, 1), true);
         }

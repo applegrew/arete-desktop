@@ -1,6 +1,7 @@
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 
+use super::display_hints::{self, DisplayHint};
 use super::log::log_llm;
 use super::mcp::{self, McpUiResource, ToolOutcome};
 use super::ollama::Ollama;
@@ -50,7 +51,8 @@ pub async fn run_agent_turn(
     tool_infos.extend(builtin_tools(ctx));
 
     let skills = render_skills_for_prompt(&load_skills(&state.skills_dir()));
-    let system = format!("{}{}", build_system_prompt(ctx, &tool_infos), skills);
+    let cached_hints = HashMap::new(); // TODO Phase 2: load from persistence
+    let system = format!("{}{}", build_system_prompt(ctx, &tool_infos, &cached_hints), skills);
 
     let history_len = body.get("messages").and_then(|m| m.as_array()).map(|a| a.len()).unwrap_or(0);
     log_llm(json!({
@@ -73,8 +75,19 @@ pub async fn run_agent_turn(
 
     // MCP tool pre-step (failure-tolerant; skipped when no tools).
     let mut ui_resources: Vec<McpUiResource> = Vec::new();
+    let mut current_hints: HashMap<String, DisplayHint> = HashMap::new();
     if !tool_infos.is_empty() {
-        pre_step(state, ollama, &tool_infos, ctx, &mut convo, sink, &mut ui_resources).await;
+        pre_step(
+            state, ollama, &tool_infos, ctx, &mut convo, sink,
+            &mut ui_resources, &mut current_hints,
+        )
+        .await;
+    }
+
+    // Inject fresh display hints as a system message so the agent sees field-level
+    // guidance for the tools it just called BEFORE building the UI envelope.
+    if let Some(hint_text) = display_hints::format_hints_turn(&current_hints) {
+        convo.push(json!({ "role": "system", "content": hint_text }));
     }
 
     match run_with_correction(ollama, convo, ctx).await {
@@ -106,6 +119,7 @@ async fn pre_step(
     convo: &mut Vec<Value>,
     sink: &Sink,
     ui_resources: &mut Vec<McpUiResource>,
+    hints: &mut HashMap<String, DisplayHint>,
 ) {
     for _ in 0..MAX_TOOL_ROUNDS {
         let step = match ollama.chat_with_tools(convo, tool_infos).await {
@@ -134,6 +148,13 @@ async fn pre_step(
             sink.tool_call_end(&tc.id).await;
             convo.push(json!({ "role": "tool", "content": outcome.text.clone(), "tool_name": tc.name.clone()}));
             ui_resources.extend(outcome.ui);
+
+            // Classify the tool result and collect display hints so the agent
+            // gets field-level guidance (columns, badges, images, hides) for
+            // building richer UI right after this turn's tool calls.
+            if let Some(hint) = display_hints::classify_tool_result(&tc.name, &outcome.text) {
+                hints.insert(tc.name.clone(), hint);
+            }
         }
     }
 }
@@ -447,8 +468,9 @@ pub(crate) fn process_emissions(emissions: &[Value], ctx: &Value) -> ProcessResu
 /// Required fields per page op (beyond `name`).
 fn page_op_required(name: &str) -> Option<&'static [&'static str]> {
     Some(match name {
-        "createPage" => &["pageId", "title"],
-        "deletePage" => &["pageId"],
+        // createPage / deletePage are intentionally absent: page lifecycle is a
+        // user-only action. They're not in the emission schema enum and are rejected
+        // client-side, so they fall through to the "unknown op" branch here too.
         "setPageProps" => &["pageId"],
         "setPageLayout" => &["pageId", "layout"],
         "pinSurface" => &["surfaceId", "pageId"],
@@ -464,7 +486,7 @@ fn validate_page_op(op: &Value, ctx: &Value) -> Vec<String> {
     let required = match page_op_required(name) {
         Some(r) => r,
         None => {
-            let known = "createPage, deletePage, setPageProps, setPageLayout, pinSurface, unpinSurface, moveSurface, setPageRegion";
+            let known = "setPageProps, setPageLayout, pinSurface, unpinSurface, moveSurface, setPageRegion";
             let active_id = ctx.get("activeTabId").and_then(|a| a.as_str()).unwrap_or("");
             let active = if !active_id.is_empty() && active_id != "chat" {
                 format!(" The active page is \"{active_id}\".")

@@ -64,15 +64,28 @@ export class DiffRouter {
     this.gated.add(surfaceId);
   }
 
+  /**
+   * Serialize a live surface's component tree back into the flat A2UI
+   * `updateComponents` shape (`{ id, component, ...props }[]`). Returns `undefined`
+   * if the surface doesn't exist. Used both to seed the shadow and to let consumers
+   * re-snapshot a surface after an approval commits buffered messages into live.
+   */
+  liveComponents(surfaceId: string): Array<Record<string, unknown>> | undefined {
+    const liveSurface = this.live.model.getSurface(surfaceId);
+    if (!liveSurface) return undefined;
+    const components: Array<Record<string, unknown>> = [];
+    for (const [id, comp] of liveSurface.componentsModel.entries) {
+      components.push({ id, component: comp.type, ...(comp.properties as Record<string, unknown>) });
+    }
+    return components;
+  }
+
   /** Mirror the current live surface into the shadow processor so a subsequent
    *  gated update diffs against real prior state (not an empty shadow). */
   private seedShadowFromLive(surfaceId: string): void {
     const liveSurface = this.live.model.getSurface(surfaceId);
     if (!liveSurface) return;
-    const components: Array<Record<string, unknown>> = [];
-    for (const [id, comp] of liveSurface.componentsModel.entries) {
-      components.push({ id, component: comp.type, ...(comp.properties as Record<string, unknown>) });
-    }
+    const components = this.liveComponents(surfaceId) ?? [];
     const seed = [
       { version: 'v0.9', createSurface: { surfaceId, catalogId: liveSurface.catalog.id, sendDataModel: true } },
       { version: 'v0.9', updateComponents: { surfaceId, components } },

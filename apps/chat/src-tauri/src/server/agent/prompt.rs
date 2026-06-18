@@ -1,11 +1,15 @@
 use serde_json::Value;
+use crate::server::agent::display_hints::{DisplayHint, format_hints_prompt};
+use std::collections::HashMap;
 
 /// Port of @arete-desktop/agent's `buildSystemPrompt`. `ctx` is the AgentContext the
 /// client sends (a JSON object); we render its fields into the prompt verbatim.
 /// `tools` is reserved for MCP (none yet) — passed empty, so the MCP section is omitted.
-pub fn build_system_prompt(ctx: &Value, tools: &[Value]) -> String {
+/// `hints` are cached display hints from prior turns (classifier output persisted per tool).
+pub fn build_system_prompt(ctx: &Value, tools: &[Value], hints: &HashMap<String, DisplayHint>) -> String {
     let tmpl = include_str!("prompt_template.txt");
-    tmpl.replace("%%COMPONENT_HINTS%%", &render_component_hints(ctx.get("componentHints")))
+    tmpl.replace("%%DISPLAY_HINTS%%", &format_hints_prompt(hints))
+        .replace("%%COMPONENT_HINTS%%", &render_component_hints(ctx.get("componentHints")))
         .replace("%%MCP_TOOLS%%", &render_mcp_tools(tools))
         .replace("%%ACTIVE_TAB%%", &str_or(ctx, "activeTabId", "(unknown)"))
         .replace("%%MOST_RECENT%%", &str_or(ctx, "mostRecentSurfaceId", "(none)"))

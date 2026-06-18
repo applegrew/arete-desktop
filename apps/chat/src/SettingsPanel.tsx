@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Dialog } from 'primereact/dialog';
 import {
   getMcpStatus,
   reconnectMcp,
@@ -32,35 +33,6 @@ interface SettingsPanelProps {
   onSave: (next: AgentSettings) => void;
 }
 
-const overlay: React.CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  background: 'rgba(5,6,16,0.5)',
-  backdropFilter: 'blur(8px)',
-  WebkitBackdropFilter: 'blur(8px)',
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'center',
-  paddingTop: '6vh',
-  zIndex: 1000,
-  animation: 'glass-rise 0.2s ease both',
-};
-const panel: React.CSSProperties = {
-  width: 'min(560px, 92vw)',
-  maxHeight: '84vh',
-  display: 'flex',
-  flexDirection: 'column',
-  overflow: 'hidden',
-  background: 'linear-gradient(180deg, rgba(28,30,54,0.78), rgba(14,15,32,0.82))',
-  backdropFilter: 'var(--blur-strong)',
-  WebkitBackdropFilter: 'var(--blur-strong)',
-  color: 'var(--text)',
-  border: '1px solid var(--glass-border-2)',
-  borderRadius: 20,
-  padding: 24,
-  boxShadow: 'var(--shadow-lg), inset 0 1px 0 rgba(255,255,255,0.12)',
-  animation: 'glass-rise 0.26s cubic-bezier(0.22,1,0.36,1) both',
-};
 const label: React.CSSProperties = { display: 'block', fontSize: 12, color: 'var(--text-dim)', marginBottom: 5 };
 const input: React.CSSProperties = {
   width: '100%',
@@ -229,22 +201,20 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
   };
 
   return (
-    <div style={overlay} onClick={onClose}>
-      <div style={panel} onClick={(e) => e.stopPropagation()}>
-        {/* Fixed header — frozen above the scroll region. */}
-        <div style={{ flex: '0 0 auto', borderBottom: '1px solid var(--hairline)', paddingBottom: 14, marginBottom: 2 }}>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-            <strong style={{ fontSize: 17, fontFamily: 'var(--font-display)', letterSpacing: -0.2 }}>Settings</strong>
-            <div style={{ flex: 1 }} />
-            <button type="button" style={btn} onClick={onClose} aria-label="Close settings">
-              ✕
-            </button>
-          </div>
-          <div style={{ fontSize: 12, color: '#777' }}>Model &amp; MCP changes apply to the next agent turn — no restart.</div>
-        </div>
-
-        {/* Scrollable body */}
-        <div style={{ flex: '1 1 auto', overflowY: 'auto', minHeight: 0 }}>
+    <Dialog
+      header="Settings"
+      visible={true}
+      onHide={onClose}
+      style={{ width: 'min(560px, 92vw)' }}
+      modal
+      closable
+      draggable={false}
+      resizable={false}
+    >
+      <div style={{ fontSize: 12, color: '#777', marginBottom: 12 }}>
+        Model &amp; MCP changes apply to the next agent turn — no restart.
+      </div>
+      <div style={{ overflowY: 'auto', maxHeight: '60vh', minHeight: 0, paddingRight: 4 }}>
         {/* Model & agent */}
         <div style={sectionTitle}>Model &amp; agent</div>
         <label style={label}>Model</label>
@@ -480,8 +450,7 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
         </label>
         </div>
 
-        {/* Fixed footer — frozen below the scroll region. */}
-        <div style={{ flex: '0 0 auto', display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 16, marginTop: 8, borderTop: '1px solid var(--hairline)' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 16, marginTop: 8, borderTop: '1px solid var(--hairline)' }}>
           <button type="button" style={btn} onClick={onClose}>
             Cancel
           </button>
@@ -500,7 +469,6 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
             Save
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

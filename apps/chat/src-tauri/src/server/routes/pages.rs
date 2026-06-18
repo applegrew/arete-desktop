@@ -19,7 +19,7 @@ pub async fn list(
     Ok(Json(db::list_pages(&conn, &q.id())?))
 }
 
-/// Create — or upsert by provided id (lets the agent's createPage use its own slug).
+/// Create — or upsert by provided id (the user's "+ New page" uses its own slug).
 pub async fn create(
     State(st): State<AppState>,
     Query(q): Query<WsQuery>,

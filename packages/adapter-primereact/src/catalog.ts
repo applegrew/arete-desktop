@@ -48,8 +48,9 @@ import { Carousel, CarouselApi } from './components/Carousel';
 import { Galleria, GalleriaApi } from './components/Galleria';
 import { OrderList, OrderListApi } from './components/OrderList';
 import { PickList, PickListApi } from './components/PickList';
+import { Dialog, DialogApi } from './components/Dialog';
 
-export { Text, Image, Card, Row, Column, Button, Divider, TextField, CheckBox, Chart, ChartApi, Embed, EmbedApi, DataTable, DataTableApi, Form, FormApi, Calendar, CalendarApi, InputNumber, InputNumberApi, Slider, SliderApi, Rating, RatingApi, InputSwitch, InputSwitchApi, Password, PasswordApi, Chips, ChipsApi, ColorPicker, ColorPickerApi, InputMask, InputMaskApi, InputOtp, InputOtpApi, MultiSelect, MultiSelectApi, AutoComplete, AutoCompleteApi, RadioButton, RadioButtonApi, SelectButton, SelectButtonApi, CascadeSelect, CascadeSelectApi, TreeSelect, TreeSelectApi, ProgressBar, ProgressBarApi, ProgressSpinner, ProgressSpinnerApi, Avatar, AvatarApi, AvatarGroup, AvatarGroupApi, Message, MessageApi, Messages, MessagesApi, Toast, ToastApi, Panel, PanelApi, Fieldset, FieldsetApi, ScrollPanel, ScrollPanelApi, Accordion, AccordionApi, TabView, TabViewApi, Splitter, SplitterApi, Toolbar, ToolbarApi, Timeline, TimelineApi, DataView, DataViewApi, OrganizationChart, OrganizationChartApi, Carousel, CarouselApi, Galleria, GalleriaApi, OrderList, OrderListApi, PickList, PickListApi };
+export { Text, Image, Card, Row, Column, Button, Divider, TextField, CheckBox, Chart, ChartApi, Embed, EmbedApi, DataTable, DataTableApi, Form, FormApi, Calendar, CalendarApi, InputNumber, InputNumberApi, Slider, SliderApi, Rating, RatingApi, InputSwitch, InputSwitchApi, Password, PasswordApi, Chips, ChipsApi, ColorPicker, ColorPickerApi, InputMask, InputMaskApi, InputOtp, InputOtpApi, MultiSelect, MultiSelectApi, AutoComplete, AutoCompleteApi, RadioButton, RadioButtonApi, SelectButton, SelectButtonApi, CascadeSelect, CascadeSelectApi, TreeSelect, TreeSelectApi, ProgressBar, ProgressBarApi, ProgressSpinner, ProgressSpinnerApi, Avatar, AvatarApi, AvatarGroup, AvatarGroupApi, Message, MessageApi, Messages, MessagesApi, Toast, ToastApi, Panel, PanelApi, Fieldset, FieldsetApi, ScrollPanel, ScrollPanelApi, Accordion, AccordionApi, TabView, TabViewApi, Splitter, SplitterApi, Toolbar, ToolbarApi, Timeline, TimelineApi, DataView, DataViewApi, OrganizationChart, OrganizationChartApi, Carousel, CarouselApi, Galleria, GalleriaApi, OrderList, OrderListApi, PickList, PickListApi, Dialog, DialogApi };
 
 const COMPONENT_LIST: ReactComponentImplementation[] = [
   Text,
@@ -102,6 +103,7 @@ const COMPONENT_LIST: ReactComponentImplementation[] = [
   Galleria,
   OrderList,
   PickList,
+  Dialog,
 ];
 
 export const primeReactCatalog = new Catalog<ReactComponentImplementation>(
@@ -202,4 +204,6 @@ export const componentAgentHints: Record<string, string> = {
     'reorderable list with up/down buttons and drag-drop. `value` or `options`: array of items. `dragdrop:true` for drag reorder. `filter:false` to hide search. Set `action` for order change events.',
   PickList:
     'dual list transfer (pick) component — move items between source and target. `source`: available items array, `target`: selected items array. `sourceHeader`/`targetHeader` for column labels. `filter:false` to hide search. Set `action` for transfer events.',
+  Dialog:
+    'modal dialog overlay. `header` (title), `child` (component ID for body), `footer` (component ID for footer buttons). `visible` (default true), `closable` (X button, default true), `closeOnEscape` (default true), `modal` (block background, default true), `draggable` (default true), `resizable` (default true). `position`: "center" (default), "top", "bottom", "left", "right", "top-left", etc. `style.width`/`style.height` control size. Place form fields or action buttons in the child/footer components.',
 };

@@ -1,3 +1,4 @@
+pub mod display_hints;
 pub mod log;
 pub mod mcp;
 pub mod ollama;

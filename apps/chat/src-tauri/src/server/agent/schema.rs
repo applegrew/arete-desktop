@@ -41,7 +41,7 @@ fn page_op_schema() -> Value {
             "name": {
                 "type": "string",
                 "enum": [
-                    "createPage", "deletePage", "setPageProps", "setPageLayout",
+                    "setPageProps", "setPageLayout",
                     "pinSurface", "unpinSurface", "moveSurface", "setPageRegion"
                 ]
             },
