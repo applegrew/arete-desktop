@@ -12,12 +12,15 @@ export interface ChatProps {
   mode: ChatMode;
   onModeChange?: (next: ChatMode) => void;
   renderSurface?: (surfaceId: string, entryId: string) => ReactNode;
+  onApproveScript?: (entryId: string) => void;
+  onRejectScript?: (entryId: string) => void;
+  onLocateSurface?: (surfaceId: string) => void;
 }
 
 const DOCK_WIDTH = 380;
 const RAIL_WIDTH = 32;
 
-export function Chat({ store, mode, onModeChange, renderSurface }: ChatProps) {
+export function Chat({ store, mode, onModeChange, renderSurface, onApproveScript, onRejectScript, onLocateSurface }: ChatProps) {
   const hooks = useHooks();
 
   const handleSubmit = (text: string) => {
@@ -127,7 +130,13 @@ export function Chat({ store, mode, onModeChange, renderSurface }: ChatProps) {
           </button>
         )}
       </header>
-      <ChatSurfaceList store={store} renderSurface={renderSurface} />
+      <ChatSurfaceList
+        store={store}
+        renderSurface={renderSurface}
+        onApproveScript={onApproveScript}
+        onRejectScript={onRejectScript}
+        onLocateSurface={onLocateSurface}
+      />
       <ChatInput onSubmit={handleSubmit} busy={hooks.busy} onCancel={hooks.onCancelPrompt} />
     </section>
   );

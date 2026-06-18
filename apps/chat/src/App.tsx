@@ -233,6 +233,12 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
   // Agent-authored widget action handlers (server-run scripts that replace LLM turns).
   const [widgetManager] = useState(() => new WidgetManager());
 
+  // Pending widgetScript emissions awaiting user approval. Keyed by entry id.
+  // Each holds the full emission so approve can apply it; reject discards.
+  const pendingScriptsRef = useRef<
+    Map<string, { targetSurfaceId: string; event: string; code: string }>
+  >(new Map());
+
   const [shellState, setShellState] = useState<ShellState>({
     activeTabId: initialActiveTabId ?? 'chat',
     chatDockState: (initialChatDockState as ShellState['chatDockState']) ?? 'dock',
@@ -247,6 +253,55 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
     if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
     highlightTimerRef.current = setTimeout(() => setHighlightedSurfaceId(null), 2400);
   }, []);
+
+  const handleApproveScript = useCallback(
+    (entryId: string) => {
+      const pending = pendingScriptsRef.current.get(entryId);
+      if (!pending) return;
+      try {
+        validateHandler(pending.code);
+        widgetManager.set(pending.targetSurfaceId, pending.event, { code: pending.code });
+        chatStore.push({
+          role: 'system',
+          text: `Learned a handler for "${pending.event}" — future clicks run instantly.`,
+        });
+      } catch (e) {
+        chatStore.push({
+          role: 'system',
+          text: `Handler for "${pending.event}" was invalid: ${(e as Error).message}`,
+        });
+      }
+      chatStore.remove(entryId);
+      pendingScriptsRef.current.delete(entryId);
+    },
+    [widgetManager, chatStore],
+  );
+
+  const handleRejectScript = useCallback(
+    (entryId: string) => {
+      const pending = pendingScriptsRef.current.get(entryId);
+      if (!pending) return;
+      chatStore.remove(entryId);
+      chatStore.push({
+        role: 'system',
+        text: `Discarded handler for "${pending.event}".`,
+      });
+      pendingScriptsRef.current.delete(entryId);
+    },
+    [chatStore],
+  );
+
+  const handleLocateSurface = useCallback(
+    (surfaceId: string) => {
+      const hostPage = pagesRef.current.find((p) =>
+        Object.prototype.hasOwnProperty.call(p.mapping, surfaceId),
+      );
+      if (hostPage) {
+        locateSurface(surfaceId, hostPage.id);
+      }
+    },
+    [locateSurface],
+  );
 
   // Bumped on any change that should trigger a debounced save (chat push,
   // surface capture). NOT driven off routerTick — the router only ticks for
@@ -742,23 +797,32 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
                 harness.apply(op as never, { autoApprove: fromUserAction });
               }
             } else if (emission.kind === 'widgetScript') {
-              // The agent attached an action handler to a surface — validate it in
-              // the webview engine (parse only) and register it so future occurrences
-              // of that event run instantly without the LLM. A syntactically bad
-              // handler is dropped (replacing the old server-side compile-check).
+              // Gate widgetScript changes: show a unified code diff for
+              // approval BEFORE registering the handler on the surface.
               try {
                 validateHandler(emission.code);
-                widgetManager.set(emission.targetSurfaceId, emission.event, { code: emission.code });
-                chatStore.push({
-                  role: 'system',
-                  text: `Learned a handler for "${emission.event}" — future clicks run instantly.`,
-                });
               } catch (e) {
                 chatStore.push({
                   role: 'system',
                   text: `Ignored an invalid "${emission.event}" handler: ${(e as Error).message}`,
                 });
+                return;
               }
+              const oldHandler = widgetManager.handlerFor(emission.targetSurfaceId, emission.event);
+              const diffEntryId = uid('scd');
+              const diffEntry = chatStore.push({
+                id: diffEntryId,
+                role: 'script-diff',
+                surfaceId: emission.targetSurfaceId,
+                scriptEvent: emission.event,
+                oldCode: oldHandler?.code ?? '',
+                newCode: emission.code,
+              });
+              pendingScriptsRef.current.set(diffEntryId, {
+                targetSurfaceId: emission.targetSurfaceId,
+                event: emission.event,
+                code: emission.code,
+              });
             }
           },
           onRunError: ({ message }) => {
@@ -1087,6 +1151,9 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
         chatTab={{
           tab: { id: 'chat', label: 'Chat', icon: <span>💬</span> },
           renderSurface: renderChatSurface,
+          onApproveScript: handleApproveScript,
+          onRejectScript: handleRejectScript,
+          onLocateSurface: handleLocateSurface,
         }}
         topBar={
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>

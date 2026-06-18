@@ -28,6 +28,9 @@ export interface ShellTab {
 export interface ChatTabConfig {
   tab: Omit<ShellTab, 'render'>;
   renderSurface?: (surfaceId: string, entryId: string) => ReactNode;
+  onApproveScript?: (entryId: string) => void;
+  onRejectScript?: (entryId: string) => void;
+  onLocateSurface?: (surfaceId: string) => void;
 }
 
 export interface ShellProps {
@@ -189,6 +192,9 @@ export function Shell({
                 mode={chatMode}
                 onModeChange={setChatMode}
                 renderSurface={chatTab.renderSurface}
+                onApproveScript={chatTab.onApproveScript}
+                onRejectScript={chatTab.onRejectScript}
+                onLocateSurface={chatTab.onLocateSurface}
               />
             )}
           </main>

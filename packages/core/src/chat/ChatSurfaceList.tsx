@@ -5,9 +5,12 @@ import { useChatEntries, type ChatStore } from './ChatStore';
 export interface ChatSurfaceListProps {
   store: ChatStore;
   renderSurface?: (surfaceId: string, entryId: string) => React.ReactNode;
+  onApproveScript?: (entryId: string) => void;
+  onRejectScript?: (entryId: string) => void;
+  onLocateSurface?: (surfaceId: string) => void;
 }
 
-export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) {
+export function ChatSurfaceList({ store, renderSurface, onApproveScript, onRejectScript, onLocateSurface }: ChatSurfaceListProps) {
   const entries = useChatEntries(store);
 
   // Chat-app scroll: pin the most-recent *typed* user message to the top edge
@@ -149,6 +152,17 @@ export function ChatSurfaceList({ store, renderSurface }: ChatSurfaceListProps) 
         }
         if (entry.role === 'tool') {
           return <ToolResultEntry key={entry.id} entry={entry} />;
+        }
+        if (entry.role === 'script-diff') {
+          return (
+            <ScriptDiffEntry
+              key={entry.id}
+              entry={entry}
+              onApprove={onApproveScript}
+              onReject={onRejectScript}
+              onLocate={onLocateSurface}
+            />
+          );
         }
         if (entry.role === 'action') {
           return (
@@ -313,4 +327,275 @@ function ToolResultEntry({
       )}
     </li>
   );
+}
+
+function ScriptDiffEntry({
+  entry,
+  onApprove,
+  onReject,
+  onLocate,
+}: {
+  entry: { id: string; text?: string; surfaceId?: string; oldCode?: string; newCode?: string; scriptEvent?: string };
+  onApprove?: (entryId: string) => void;
+  onReject?: (entryId: string) => void;
+  onLocate?: (surfaceId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [approved, setApproved] = useState(false);
+  const oldLines = (entry.oldCode ?? '').split('\n');
+  const newLines = (entry.newCode ?? '').split('\n');
+  const hasOld = entry.oldCode != null && entry.oldCode.length > 0;
+  const isNew = !hasOld;
+
+  const headerText = entry.text ?? (
+    isNew
+      ? `New handler for "${entry.scriptEvent ?? 'unknown'}"`
+      : `Updated handler for "${entry.scriptEvent ?? 'unknown'}"`
+  );
+
+  if (approved) {
+    return (
+      <li
+        style={{
+          background: 'rgba(16,185,129,0.08)',
+          border: '1px solid rgba(16,185,129,0.25)',
+          borderRadius: 12,
+          padding: '8px 12px',
+          fontSize: 12,
+          alignSelf: 'center',
+          maxWidth: '90%',
+          textAlign: 'center',
+          color: 'var(--text-dim)',
+          animation: 'glass-rise 0.3s ease both',
+        }}
+      >
+        ✅ Approved — handler for "{entry.scriptEvent}" is now active.
+      </li>
+    );
+  }
+
+  return (
+    <li
+      style={{
+        background: 'var(--glass, #1a1e2e)',
+        backdropFilter: 'var(--blur)',
+        WebkitBackdropFilter: 'var(--blur)',
+        border: '1px solid var(--glass-border-2, rgba(124,131,255,0.35))',
+        borderRadius: 14,
+        padding: 0,
+        fontSize: 12,
+        alignSelf: 'flex-start',
+        maxWidth: '92%',
+        boxShadow: '0 4px 18px -6px rgba(124,131,255,0.18), inset 0 1px 0 rgba(255,255,255,0.06)',
+        animation: 'glass-rise 0.3s ease both',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Header bar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '9px 12px',
+          background: 'rgba(124,131,255,0.08)',
+          borderBottom: '1px solid var(--hairline)',
+          cursor: 'pointer',
+        }}
+        onClick={() => setExpanded((e) => !e)}
+      >
+        <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{expanded ? '▼' : '▶'}</span>
+        <span style={{ fontSize: 14 }}>📜</span>
+        <span style={{ fontWeight: 600, color: 'var(--text)', flex: 1 }}>
+          {headerText}
+        </span>
+        {entry.surfaceId && onLocate && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onLocate(entry.surfaceId!); }}
+            title="Show affected surface"
+            style={{
+              background: 'var(--glass-2)',
+              border: '1px solid var(--glass-border)',
+              borderRadius: 999,
+              padding: '2px 10px',
+              fontSize: 11,
+              color: 'var(--accent, #7c83ff)',
+              cursor: 'pointer',
+            }}
+          >
+            📌 {entry.surfaceId}
+          </button>
+        )}
+      </div>
+
+      {expanded && (
+        <>
+          {/* Unified diff view */}
+          <div
+            style={{
+              padding: '8px 10px',
+              background: 'rgba(0,0,0,0.32)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10.5,
+              lineHeight: 1.55,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+              maxHeight: 260,
+              overflowY: 'auto',
+            }}
+          >
+            {isNew
+              ? newLines.map((line, i) => (
+                  <div key={i} style={{ color: '#6ee7b7', paddingLeft: 4 }}>
+                    + {line || ' '}
+                  </div>
+                ))
+              : renderUnifiedDiff(oldLines, newLines)}
+          </div>
+
+          {/* Approve / Reject bar */}
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              padding: '8px 12px',
+              borderTop: '1px solid var(--hairline)',
+              background: 'rgba(0,0,0,0.12)',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => { setApproved(true); onApprove?.(entry.id); }}
+              style={{
+                background: 'rgba(16,185,129,0.15)',
+                border: '1px solid rgba(16,185,129,0.4)',
+                borderRadius: 999,
+                padding: '5px 14px',
+                fontSize: 12,
+                fontWeight: 600,
+                color: '#6ee7b7',
+                cursor: 'pointer',
+              }}
+            >
+              ✓ Approve
+            </button>
+            <button
+              type="button"
+              onClick={() => onReject?.(entry.id)}
+              style={{
+                background: 'rgba(248,113,113,0.12)',
+                border: '1px solid rgba(248,113,113,0.35)',
+                borderRadius: 999,
+                padding: '5px 14px',
+                fontSize: 12,
+                fontWeight: 600,
+                color: '#fca5a5',
+                cursor: 'pointer',
+              }}
+            >
+              ✕ Reject
+            </button>
+          </div>
+        </>
+      )}
+    </li>
+  );
+}
+
+/** Simple line-by-line diff: marks additions/deletions, shows common lines dimmed. */
+function renderUnifiedDiff(oldLines: string[], newLines: string[]): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  // Basic LCS-style diff: walk both arrays, mark differences.
+  const maxLen = Math.max(oldLines.length, newLines.length);
+  const window = 3; // lines of context around changes
+
+  // Build a quick diff map: which old lines are deleted, which new are added
+  const matches = lcsMatch(oldLines, newLines);
+  let i = 0; // old index
+  let j = 0; // new index
+
+  for (const [oi, nj] of matches) {
+    // Lines in old before this match → deletions
+    while (i < oi) {
+      out.push(
+        <div key={`del-${i}`} style={{ color: '#fca5a5', background: 'rgba(248,113,113,0.06)', paddingLeft: 4 }}>
+          - {oldLines[i] || ' '}
+        </div>,
+      );
+      i++;
+    }
+    // Lines in new before this match → additions
+    while (j < nj) {
+      out.push(
+        <div key={`add-${j}`} style={{ color: '#6ee7b7', background: 'rgba(16,185,129,0.06)', paddingLeft: 4 }}>
+          + {newLines[j] || ' '}
+        </div>,
+      );
+      j++;
+    }
+    // Match line
+    out.push(
+      <div key={`eq-${i}`} style={{ color: 'var(--text-faint)', paddingLeft: 4, opacity: 0.55 }}>
+        {' '}&nbsp;{oldLines[i] || ' '}
+      </div>,
+    );
+    i++;
+    j++;
+  }
+
+  // Trailing deletions
+  while (i < oldLines.length) {
+    out.push(
+      <div key={`del-${i}`} style={{ color: '#fca5a5', background: 'rgba(248,113,113,0.06)', paddingLeft: 4 }}>
+        - {oldLines[i] || ' '}
+      </div>,
+    );
+    i++;
+  }
+  // Trailing additions
+  while (j < newLines.length) {
+    out.push(
+      <div key={`add-${j}`} style={{ color: '#6ee7b7', background: 'rgba(16,185,129,0.06)', paddingLeft: 4 }}>
+        + {newLines[j] || ' '}
+      </div>,
+    );
+    j++;
+  }
+
+  return out;
+}
+
+/** Compute a minimal set of matching (oldIndex, newIndex) pairs via LCS. */
+function lcsMatch(a: string[], b: string[]): Array<[number, number]> {
+  // Build LCS table for only the changed regions.
+  const m = a.length;
+  const n = b.length;
+  // DP table
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        dp[i]![j] = dp[i - 1]![j - 1]! + 1;
+      } else {
+        dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
+      }
+    }
+  }
+  // Backtrack
+  const matches: Array<[number, number]> = [];
+  let i = m;
+  let j = n;
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) {
+      matches.unshift([i - 1, j - 1]);
+      i--;
+      j--;
+    } else if (dp[i - 1]![j]! >= dp[i]![j - 1]!) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+  return matches;
 }

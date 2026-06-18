@@ -6,7 +6,7 @@ import {
   type TranscriptOptions,
 } from '../agent/transcript';
 
-export type ChatRole = 'user' | 'agent' | 'system' | 'thought' | 'tool' | 'action';
+export type ChatRole = 'user' | 'agent' | 'system' | 'thought' | 'tool' | 'action' | 'script-diff';
 
 export interface ChatEntry {
   id: string;
@@ -24,6 +24,10 @@ export interface ChatEntry {
   /** Transient "working" status (e.g. waiting on the agent) — rendered as an animated indicator. */
   pending?: boolean;
   createdAt: number;
+  /** Fields for role === 'script-diff': old vs new handler code. */
+  oldCode?: string;
+  newCode?: string;
+  scriptEvent?: string;
 }
 
 type Listener = () => void;
