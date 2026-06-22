@@ -60,19 +60,16 @@ export const CreatePageButton = createComponentImplementation(CreatePageButtonAp
   const label = state === 'done' ? 'Page created' : FIXED_LABEL;
 
   return (
-    <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
-      <PrimeButton
-        label={label}
-        icon={state === 'done' ? 'pi pi-check' : 'pi pi-plus'}
-        severity="info"
-        loading={state === 'busy'}
-        // Disabled when already created or when no trusted handler is wired.
-        disabled={state !== 'idle' || !systemActions}
-        onClick={onClick}
-      />
-      {props.pageTitle && state !== 'done' && (
-        <span style={{ fontSize: 11.5, opacity: 0.7 }}>“{props.pageTitle}”</span>
-      )}
-    </div>
+    <PrimeButton
+      label={label}
+      // Only a confirmation check on success; no leading icon otherwise (the label
+      // already reads "Create page" — a "+" prefix is redundant).
+      icon={state === 'done' ? 'pi pi-check' : undefined}
+      severity="info"
+      loading={state === 'busy'}
+      // Disabled when already created or when no trusted handler is wired.
+      disabled={state !== 'idle' || !systemActions}
+      onClick={onClick}
+    />
   );
 });
