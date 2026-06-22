@@ -9,7 +9,19 @@ export { HookProvider, useHooks } from './shell/HookContext';
 export { Chat } from './chat/Chat';
 export type { ChatProps, ChatMode } from './chat/Chat';
 export { ChatStore, useChatEntries } from './chat/ChatStore';
-export type { ChatEntry, ChatRole } from './chat/ChatStore';
+export type { ChatEntry, ChatRole, DiscoveryChip } from './chat/ChatStore';
+export {
+  STATIC_DISCOVERY_CHIPS,
+  resolveStaticChips,
+  isDashboardPage,
+  DASHBOARD_PAGE_ID,
+  DASHBOARD_PAGE_TITLE,
+} from './chat/discovery-chips';
+export type {
+  StaticDiscoveryChip,
+  DiscoveryChipContext,
+  DiscoveryPageInfo,
+} from './chat/discovery-chips';
 
 // Agent-loop scaffold — arete-desktop provides the transcript, the emission/response
 // contract, and a context-snapshot builder; the loop itself is consumer-owned.
@@ -69,6 +81,8 @@ export {
 } from './action/ActionHarnessContext';
 export { useAction } from './action/use-action';
 export type { DispatchAction, DispatchActionInput, UseActionOpts } from './action/use-action';
+export { SystemActionsProvider, useSystemActions } from './action/SystemActionsContext';
+export type { SystemActions, CreatePageOptions } from './action/SystemActionsContext';
 
 export type { ShellState, ChatDockState } from './types/shell-state';
 export { defaultShellState } from './types/shell-state';

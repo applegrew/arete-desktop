@@ -136,6 +136,7 @@ export function Chat({ store, mode, onModeChange, renderSurface, onApproveScript
         onApproveScript={onApproveScript}
         onRejectScript={onRejectScript}
         onLocateSurface={onLocateSurface}
+        onChipClick={handleSubmit}
       />
       <ChatInput onSubmit={handleSubmit} busy={hooks.busy} onCancel={hooks.onCancelPrompt} />
     </section>

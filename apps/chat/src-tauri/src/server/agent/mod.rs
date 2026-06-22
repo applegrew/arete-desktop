@@ -104,6 +104,9 @@ pub async fn run_turn(State(st): State<AppState>, Json(body): Json<Value>) -> Re
                 for emission in &outcome.validated {
                     sink.emission(emission).await;
                 }
+                if !outcome.discovery_chips.is_empty() {
+                    sink.discovery_chips(&Value::Array(outcome.discovery_chips.clone())).await;
+                }
                 sink.run_finished(&thread_id, &run_id).await;
             }
             Err((status, body)) => {

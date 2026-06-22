@@ -19,6 +19,15 @@ import type { Emission } from '@arete-desktop/core';
 /** CUSTOM event name that carries an arete-desktop {@link Emission} as its `value`. */
 export const ARETE_EMISSION_EVENT = 'arete.emission';
 
+/** CUSTOM event name that carries discovery chips (`{ label, prompt }[]`) as its `value`. */
+export const ARETE_DISCOVERY_CHIPS_EVENT = 'arete.discoveryChips';
+
+/** A discovery chip: clicking it submits `prompt` as if the user typed it. */
+export interface DiscoveryChip {
+  label: string;
+  prompt: string;
+}
+
 export interface TextStartInfo {
   messageId: string;
   role?: string;
@@ -44,6 +53,9 @@ export interface AgUiHandlers {
 
   /** An arete emission (A2UI surface messages or a page op) to route via the Diff Engine / harness. */
   onEmission?(emission: Emission): void;
+
+  /** Discovery chips the agent suggested for next steps (rendered as clickable pills). */
+  onDiscoveryChips?(chips: DiscoveryChip[]): void;
 
   onToolCallStart?(info: ToolCallInfo): void;
   onToolCallEnd?(info: { toolCallId: string }): void;
@@ -75,6 +87,20 @@ function asEmission(value: unknown): Emission | null {
     return v as unknown as Emission;
   }
   return null;
+}
+
+/** Narrow a parsed CUSTOM `value` to a list of well-formed {@link DiscoveryChip}. */
+function asDiscoveryChips(value: unknown): DiscoveryChip[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((c) => {
+    if (c && typeof c === 'object') {
+      const o = c as Record<string, unknown>;
+      if (typeof o.label === 'string' && o.label && typeof o.prompt === 'string' && o.prompt) {
+        return [{ label: o.label, prompt: o.prompt }];
+      }
+    }
+    return [];
+  });
 }
 
 /**
@@ -160,6 +186,13 @@ export class AgUiDecoder {
           const emission = asEmission(e.value);
           if (emission) {
             h.onEmission?.(emission);
+            break;
+          }
+        }
+        if (name === ARETE_DISCOVERY_CHIPS_EVENT) {
+          const chips = asDiscoveryChips(e.value);
+          if (chips.length > 0) {
+            h.onDiscoveryChips?.(chips);
             break;
           }
         }

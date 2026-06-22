@@ -8,9 +8,11 @@ export interface ChatSurfaceListProps {
   onApproveScript?: (entryId: string) => void;
   onRejectScript?: (entryId: string) => void;
   onLocateSurface?: (surfaceId: string) => void;
+  /** Click handler for a discovery chip — submits its prompt as if the user typed it. */
+  onChipClick?: (prompt: string) => void;
 }
 
-export function ChatSurfaceList({ store, renderSurface, onApproveScript, onRejectScript, onLocateSurface }: ChatSurfaceListProps) {
+export function ChatSurfaceList({ store, renderSurface, onApproveScript, onRejectScript, onLocateSurface, onChipClick }: ChatSurfaceListProps) {
   const entries = useChatEntries(store);
 
   // Chat-app scroll: pin the most-recent *typed* user message to the top edge
@@ -249,6 +251,72 @@ export function ChatSurfaceList({ store, renderSurface, onApproveScript, onRejec
                 <span style={{ color: 'var(--accent-2, #22d3ee)', fontSize: 11.5, fontWeight: 500 }}>
                   Show ↗
                 </span>
+              </button>
+            </li>
+          );
+        }
+        if (entry.role === 'chips') {
+          const chips = entry.chips ?? [];
+          if (chips.length === 0) return null;
+          return (
+            <li
+              key={entry.id}
+              data-entry-id={entry.id}
+              style={{
+                alignSelf: 'flex-start',
+                maxWidth: '92%',
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: 8,
+                animation: 'glass-rise 0.3s ease both',
+              }}
+            >
+              {chips.map((chip, i) => (
+                <button
+                  key={`${chip.label}-${i}`}
+                  type="button"
+                  onClick={() => onChipClick?.(chip.prompt)}
+                  title={chip.prompt}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 12px',
+                    borderRadius: 999,
+                    fontSize: 12.5,
+                    fontFamily: 'inherit',
+                    color: 'var(--text-dim, #c7d2fe)',
+                    background: 'var(--glass, rgba(124,131,255,0.1))',
+                    border: '1px solid var(--glass-border, rgba(124,131,255,0.28))',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span aria-hidden style={{ opacity: 0.7 }}>✦</span>
+                  <span>{chip.label}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => store.remove(entry.id)}
+                aria-label="Dismiss suggestions"
+                title="Dismiss suggestions"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 22,
+                  height: 22,
+                  borderRadius: 999,
+                  fontSize: 13,
+                  lineHeight: 1,
+                  color: 'var(--text-faint, #888)',
+                  background: 'transparent',
+                  border: '1px solid transparent',
+                  cursor: 'pointer',
+                }}
+              >
+                ×
               </button>
             </li>
           );

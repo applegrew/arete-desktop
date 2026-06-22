@@ -10,6 +10,20 @@ pub fn envelope_schema() -> Value {
         "properties": {
             "reply": { "type": "string" },
             "rationale": { "type": "string" },
+            // Optional discovery chips: clickable next-step suggestions shown in chat.
+            // Each becomes a user message when clicked (pure prompt-injection).
+            "discoveryChips": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": { "type": "string" },
+                        "prompt": { "type": "string" }
+                    },
+                    "required": ["label", "prompt"],
+                    "additionalProperties": false
+                }
+            },
             "emissions": {
                 "type": "array",
                 "items": {

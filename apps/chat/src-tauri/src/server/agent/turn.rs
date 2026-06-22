@@ -23,6 +23,8 @@ pub struct Outcome {
     pub validated: Vec<Value>,
     pub rationale: Option<String>,
     pub reply: Option<String>,
+    /// Optional discovery chips ({label, prompt}) the agent suggests for next steps.
+    pub discovery_chips: Vec<Value>,
 }
 
 /// Error: (http status, body). Mirrors AgentOutcome::err.
@@ -341,6 +343,7 @@ async fn run_with_correction(
                 validated: cleaned,
                 rationale: env_str(&envelope, "rationale"),
                 reply,
+                discovery_chips: env_chips(&envelope),
             });
         }
 
@@ -348,6 +351,7 @@ async fn run_with_correction(
             validated: result.validated,
             rationale: env_str(&envelope, "rationale"),
             reply: env_str(&envelope, "reply"),
+            discovery_chips: env_chips(&envelope),
         });
     }
 }
@@ -390,6 +394,24 @@ fn env_str(envelope: &Value, key: &str) -> Option<String> {
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(String::from)
+}
+
+/// Extract well-formed `discoveryChips` ({label, prompt} with non-empty strings)
+/// from the envelope, dropping any malformed entries.
+fn env_chips(envelope: &Value) -> Vec<Value> {
+    envelope
+        .get("discoveryChips")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|c| {
+                    let label = c.get("label").and_then(|v| v.as_str()).filter(|s| !s.is_empty())?;
+                    let prompt = c.get("prompt").and_then(|v| v.as_str()).filter(|s| !s.is_empty())?;
+                    Some(json!({ "label": label, "prompt": prompt }))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) struct ProcessResult {

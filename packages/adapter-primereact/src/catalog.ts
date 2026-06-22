@@ -49,8 +49,9 @@ import { Galleria, GalleriaApi } from './components/Galleria';
 import { OrderList, OrderListApi } from './components/OrderList';
 import { PickList, PickListApi } from './components/PickList';
 import { Dialog, DialogApi } from './components/Dialog';
+import { CreatePageButton, CreatePageButtonApi } from './components/CreatePageButton';
 
-export { Text, Image, Card, Row, Column, Button, Divider, TextField, CheckBox, Chart, ChartApi, Embed, EmbedApi, DataTable, DataTableApi, Form, FormApi, Calendar, CalendarApi, InputNumber, InputNumberApi, Slider, SliderApi, Rating, RatingApi, InputSwitch, InputSwitchApi, Password, PasswordApi, Chips, ChipsApi, ColorPicker, ColorPickerApi, InputMask, InputMaskApi, InputOtp, InputOtpApi, MultiSelect, MultiSelectApi, AutoComplete, AutoCompleteApi, RadioButton, RadioButtonApi, SelectButton, SelectButtonApi, CascadeSelect, CascadeSelectApi, TreeSelect, TreeSelectApi, ProgressBar, ProgressBarApi, ProgressSpinner, ProgressSpinnerApi, Avatar, AvatarApi, AvatarGroup, AvatarGroupApi, Message, MessageApi, Messages, MessagesApi, Toast, ToastApi, Panel, PanelApi, Fieldset, FieldsetApi, ScrollPanel, ScrollPanelApi, Accordion, AccordionApi, TabView, TabViewApi, Splitter, SplitterApi, Toolbar, ToolbarApi, Timeline, TimelineApi, DataView, DataViewApi, OrganizationChart, OrganizationChartApi, Carousel, CarouselApi, Galleria, GalleriaApi, OrderList, OrderListApi, PickList, PickListApi, Dialog, DialogApi };
+export { Text, Image, Card, Row, Column, Button, Divider, TextField, CheckBox, Chart, ChartApi, Embed, EmbedApi, DataTable, DataTableApi, Form, FormApi, Calendar, CalendarApi, InputNumber, InputNumberApi, Slider, SliderApi, Rating, RatingApi, InputSwitch, InputSwitchApi, Password, PasswordApi, Chips, ChipsApi, ColorPicker, ColorPickerApi, InputMask, InputMaskApi, InputOtp, InputOtpApi, MultiSelect, MultiSelectApi, AutoComplete, AutoCompleteApi, RadioButton, RadioButtonApi, SelectButton, SelectButtonApi, CascadeSelect, CascadeSelectApi, TreeSelect, TreeSelectApi, ProgressBar, ProgressBarApi, ProgressSpinner, ProgressSpinnerApi, Avatar, AvatarApi, AvatarGroup, AvatarGroupApi, Message, MessageApi, Messages, MessagesApi, Toast, ToastApi, Panel, PanelApi, Fieldset, FieldsetApi, ScrollPanel, ScrollPanelApi, Accordion, AccordionApi, TabView, TabViewApi, Splitter, SplitterApi, Toolbar, ToolbarApi, Timeline, TimelineApi, DataView, DataViewApi, OrganizationChart, OrganizationChartApi, Carousel, CarouselApi, Galleria, GalleriaApi, OrderList, OrderListApi, PickList, PickListApi, Dialog, DialogApi, CreatePageButton, CreatePageButtonApi };
 
 const COMPONENT_LIST: ReactComponentImplementation[] = [
   Text,
@@ -104,6 +105,7 @@ const COMPONENT_LIST: ReactComponentImplementation[] = [
   OrderList,
   PickList,
   Dialog,
+  CreatePageButton,
 ];
 
 export const primeReactCatalog = new Catalog<ReactComponentImplementation>(
@@ -121,6 +123,8 @@ export const componentAgentHints: Record<string, string> = {
     'bar/line: a single data series — the x-axis `labels` identify each bar and there is NO per-bar legend; put the heading in `title`. pie/doughnut: a legend is shown listing each `labels` entry. `labels` and `data` must be equal length. Set `action` to make segments clickable for drill-down.',
   Button:
     'set `action.event.name` to make it interactive; clicking dispatches that event back to you on the next turn.',
+  CreatePageButton:
+    'a SYSTEM-TRUSTED button — the ONLY way to create a page (you cannot create pages yourself). The user must click it; it does NOT dispatch an action back to you. Its visible label is FIXED ("Create page") and cannot be changed. Place it inside a short surface that guides the user to make a page (e.g. a dashboard). Props are data only: `pageTitle`, `pageIcon`, `pageId` (use the well-known id for dedupe, e.g. "dashboard"), and optional `pinSurfaceId` to pin an existing result surface into the new page.',
   TextField:
     'the field value binds through the surface data model (e.g. {path:"/field"}); read the current value from the data model, not from the component spec.',
   CheckBox: 'value is a boolean; like TextField it reflects live data-model state.',

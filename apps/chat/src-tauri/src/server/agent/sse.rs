@@ -22,6 +22,10 @@ pub const CUSTOM: &str = "CUSTOM";
 /// CUSTOM event name carrying an arete Emission (matches @arete-desktop/agui's ARETE_EMISSION_EVENT).
 pub const ARETE_EMISSION_EVENT: &str = "arete.emission";
 
+/// CUSTOM event name carrying discovery chips (matches @arete-desktop/agui's ARETE_DISCOVERY_CHIPS_EVENT).
+/// `value` is an array of `{ label, prompt }`.
+pub const ARETE_DISCOVERY_CHIPS_EVENT: &str = "arete.discoveryChips";
+
 /// Writes AG-UI SSE frames into an mpsc channel as raw `data: <json>\n\n` bytes —
 /// byte-compatible with the old Node server (each payload gets a `timestamp`).
 pub struct Sink {
@@ -75,6 +79,11 @@ impl Sink {
 
     pub async fn emission(&self, value: &Value) {
         self.send(json!({ "type": CUSTOM, "name": ARETE_EMISSION_EVENT, "value": value })).await;
+    }
+
+    /// Emit discovery chips as a CUSTOM event. `chips` is an array of `{ label, prompt }`.
+    pub async fn discovery_chips(&self, chips: &Value) {
+        self.send(json!({ "type": CUSTOM, "name": ARETE_DISCOVERY_CHIPS_EVENT, "value": chips })).await;
     }
 
     pub async fn tool_call_start(&self, id: &str, name: &str) {

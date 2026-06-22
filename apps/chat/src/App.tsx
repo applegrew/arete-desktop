@@ -10,10 +10,15 @@ import {
   DiffOverlay,
   SurfaceBoundary,
   SurfaceIdProvider,
+  SystemActionsProvider,
   PageOpsHarness,
   ActionHarness,
   RenderDiagnosticsStore,
+  resolveStaticChips,
+  DASHBOARD_PAGE_ID,
+  DASHBOARD_PAGE_TITLE,
   type RenderDiagnostic,
+  type SystemActions,
   withComponentIds,
   buildAgentContext,
   deriveSurfaceLabel,
@@ -375,6 +380,39 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
     [commitPages, workspaceId],
   );
 
+  // Trusted, user-initiated page creation routed from <CreatePageButton>. The agent
+  // CANNOT create pages itself (it would let it silently mutate the workspace), so this
+  // is the only path: a real click lands here, never the LLM. Optionally pins a result
+  // surface into the new page, switches to it, then informs the agent so it can guide
+  // the next step (e.g. suggest widgets to add).
+  const handleCreatePage = useCallback<SystemActions['createPage']>(
+    async ({ id, title, icon, color, pinSurfaceId }) => {
+      const pageId = createPageLocal({ id, title, icon, color });
+      if (pinSurfaceId && router.getLiveSurface(pinSurfaceId)) {
+        try {
+          await harness.apply(
+            { name: 'pinSurface', surfaceId: pinSurfaceId, pageId, region: DEFAULT_LAYOUT.regions[0]!.id },
+            { autoApprove: true },
+          );
+        } catch {
+          /* pin is best-effort; the page is still created */
+        }
+      }
+      setShellState((s) => ({ ...s, activeTabId: pageId }));
+      const pageTitle = title || 'New page';
+      chatStore.push({ role: 'system', text: `Created page “${pageTitle}”.` });
+      // Inform the agent so it can confirm and suggest next steps (e.g. discoveryChips).
+      void handlePromptRef.current(
+        `[SYSTEM] The user just created the page "${pageTitle}"${pinSurfaceId ? ' and pinned a surface into it' : ''}. Briefly confirm, and if useful suggest a few discoveryChips for widgets they could add to this page.`,
+        true,
+      );
+      return pageId;
+    },
+    [createPageLocal, harness, chatStore, router],
+  );
+
+  const systemActions = useMemo<SystemActions>(() => ({ createPage: handleCreatePage }), [handleCreatePage]);
+
   const updatePageLocal = useCallback(
     (id: string, patch: Partial<ApiPage>) => {
       commitPages(pagesRef.current.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p)));
@@ -575,6 +613,14 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
         });
       }
 
+      // 3b. On a fresh (empty) chat, seed curated discovery chips so users can find
+      //     advanced capabilities. Each is pure prompt-injection on click; conditional
+      //     chips (e.g. "create a dashboard") are hidden if that page already exists.
+      if (chat.length === 0) {
+        const chips = resolveStaticChips({ pages: ps.map((p) => ({ id: p.id, title: p.title })) });
+        if (chips.length > 0) chatStore.push({ role: 'chips', chips });
+      }
+
       // 4. Per-workspace UI state (active tab + chat dock) is seeded into shellState
       //    from the workspace record via props — no separate load needed.
       getAgentHealth()
@@ -590,13 +636,18 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
   useEffect(() => {
     if (!hydrated) return;
     const t = setTimeout(() => {
-      const entries = chatStore.getSnapshot().map((e) => ({
-        id: e.id,
-        role: e.role,
-        text: e.text ?? '',
-        surfaceId: e.surfaceId,
-        createdAt: e.createdAt,
-      }));
+      const entries = chatStore
+        .getSnapshot()
+        // 'chips' rows are ephemeral discovery nudges (no persisted `chips` field) —
+        // don't save them, so they never restore empty and the empty-chat seed still fires.
+        .filter((e) => e.role !== 'chips')
+        .map((e) => ({
+          id: e.id,
+          role: e.role,
+          text: e.text ?? '',
+          surfaceId: e.surfaceId,
+          createdAt: e.createdAt,
+        }));
       saveChat(workspaceId, entries).catch(() => {});
     }, 1500);
     return () => clearTimeout(t);
@@ -824,6 +875,10 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
                 code: emission.code,
               });
             }
+          },
+          onDiscoveryChips: (chips) => {
+            clearAsking();
+            if (chips.length > 0) chatStore.push({ role: 'chips', chips });
           },
           onRunError: ({ message }) => {
             clearAsking();
@@ -1151,6 +1206,7 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
 
   return (
     <MarkdownContext.Provider value={renderMarkdown}>
+      <SystemActionsProvider value={systemActions}>
       <Shell
         tabs={tabs}
         state={shellState}
@@ -1226,6 +1282,7 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
           onSave={handleSaveSettings}
         />
       )}
+      </SystemActionsProvider>
     </MarkdownContext.Provider>
   );
 }

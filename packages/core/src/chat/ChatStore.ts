@@ -6,7 +6,13 @@ import {
   type TranscriptOptions,
 } from '../agent/transcript';
 
-export type ChatRole = 'user' | 'agent' | 'system' | 'thought' | 'tool' | 'action' | 'script-diff' | 'surface-moved';
+export type ChatRole = 'user' | 'agent' | 'system' | 'thought' | 'tool' | 'action' | 'script-diff' | 'surface-moved' | 'chips';
+
+/** A single discovery chip: clicking it submits `prompt` as if the user typed it. */
+export interface DiscoveryChip {
+  label: string;
+  prompt: string;
+}
 
 export interface ChatEntry {
   id: string;
@@ -30,6 +36,8 @@ export interface ChatEntry {
   scriptEvent?: string;
   /** When role === 'surface-moved', the id of the entry the surface was moved to. */
   movedToEntryId?: string;
+  /** Discovery chips (present when role === 'chips'). */
+  chips?: DiscoveryChip[];
 }
 
 type Listener = () => void;
@@ -58,6 +66,7 @@ export class ChatStore {
       toolError: entry.toolError,
       actionLabel: entry.actionLabel,
       pending: entry.pending,
+      chips: entry.chips,
       createdAt: Date.now(),
     };
     this.entries = [...this.entries, e];
