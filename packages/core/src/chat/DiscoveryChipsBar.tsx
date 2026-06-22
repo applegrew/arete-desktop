@@ -19,7 +19,7 @@ export function DiscoveryChipsBar({ chips, onChipClick }: DiscoveryChipsBarProps
         display: 'flex',
         flexWrap: 'wrap',
         gap: 8,
-        padding: '8px 14px 0',
+        padding: '8px 14px 10px',
       }}
     >
       {chips.map((chip, i) => (
