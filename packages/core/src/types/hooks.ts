@@ -28,7 +28,12 @@ export interface HookContextValue {
 export type A2uiInboundMessage = A2uiMessage;
 
 export interface ApplyContext {
+  /** The single surface targeted, when the batch touches exactly one. */
   surfaceId?: string;
+  /** Every surface id this batch touches (deduped, in first-seen order). */
+  surfaceIds?: string[];
+  /** True when the batch is a user-action edit applying straight to live. */
+  bypassGate?: boolean;
 }
 
 export type OnBeforeApply = (

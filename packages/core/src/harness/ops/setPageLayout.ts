@@ -52,6 +52,7 @@ export function applySetPageLayout(
   // 2. Place displaced surfaces into the next free new regions; park any
   //    remaining overflow in the last region so they survive the change.
   let ri = 0;
+  const parked: string[] = [];
   for (const surfaceId of overflow) {
     while (ri < newRegions.length && occupied.has(newRegions[ri]!)) ri++;
     if (ri < newRegions.length) {
@@ -61,9 +62,18 @@ export function applySetPageLayout(
       ri++;
     } else if (newRegions.length > 0) {
       nextMapping[surfaceId] = newRegions[newRegions.length - 1]!;
+      parked.push(surfaceId);
     } else {
       nextMapping[surfaceId] = input.mapping[surfaceId]!; // degenerate: no regions
     }
+  }
+
+  if (parked.length > 1) {
+    // Several surfaces share the last region. A 1:1 region→surface renderer will
+    // only show one — surface the loss rather than letting it look fully applied.
+    console.warn(
+      `[arete] setPageLayout: ${parked.length} surfaces parked in the last region (not enough regions for the layout): ${parked.join(', ')}`,
+    );
   }
 
   return { layout: op.layout, mapping: nextMapping };

@@ -21,6 +21,12 @@ export const diffPalette = {
     border: '#D97706',
     text: '#92400E',
   },
+  // Reparented (moved) components — amber, distinct from the orange of changed.
+  moved: {
+    bg: '#FEF9C3',
+    border: '#CA8A04',
+    text: '#854D0E',
+  },
 } as const;
 
 export const liveDim = {

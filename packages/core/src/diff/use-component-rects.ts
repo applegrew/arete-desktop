@@ -28,9 +28,11 @@ export function useComponentRects(
   }));
   const prevPendingKey = useRef<string | null>(null);
 
-  // When pendingKey flips on, snapshot the current rects into prev before the
-  // shadow paints. Done synchronously in render so the snapshot reflects the live DOM.
-  if (pendingKey !== null && prevPendingKey.current === null) {
+  // Snapshot current → prev whenever a NEW (different) pending diff appears, before
+  // its shadow paints. Triggering on any key change — not just null→non-null — keeps
+  // `prev` fresh across diff→diff transitions (a second/re-based diff on the same
+  // surface), so "removed" outlines aren't drawn against rects from before the first.
+  if (pendingKey !== null && pendingKey !== prevPendingKey.current) {
     rects.prev = new Map(rects.current);
   }
   prevPendingKey.current = pendingKey;

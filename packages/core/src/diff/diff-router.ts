@@ -2,6 +2,7 @@ import type { MessageProcessor, A2uiMessage, SurfaceModel } from '@a2ui/web_core
 import type { ReactComponentImplementation } from '@a2ui/react/v0_9';
 import type { ContentDiff } from '../types/diff';
 import type {
+  ApplyContext,
   HookContextValue,
   OnApprove,
   OnBeforeApply,
@@ -93,6 +94,34 @@ export class DiffRouter {
     this.shadow.processMessages(seed);
   }
 
+  /**
+   * Recompute a pending diff against the CURRENT live state. Called when a live
+   * mutation drifts the baseline out from under a pending shadow diff, so the
+   * preview the user sees keeps matching what approve() will commit (C3).
+   */
+  private rebasePending(surfaceId: string): void {
+    const existing = this.pending.get(surfaceId);
+    if (!existing) return;
+    // Throw away the stale shadow, re-seed from the new live, replay the proposal.
+    if (this.shadow.model.getSurface(surfaceId)) {
+      this.shadow.model.deleteSurface(surfaceId);
+    }
+    const buffered = existing.bufferedMessages;
+    const batchCreates = buffered.some((m) => 'createSurface' in m);
+    if (!batchCreates && this.live.model.getSurface(surfaceId)) {
+      this.seedShadowFromLive(surfaceId);
+    }
+    this.shadow.processMessages(buffered);
+    const diff = computeContentDiff(
+      surfaceId,
+      this.live.model.getSurface(surfaceId),
+      this.shadow.model.getSurface(surfaceId),
+    );
+    this.pending.set(surfaceId, { surfaceId, bufferedMessages: buffered, diff });
+    this.hooks.onProposed?.(diff);
+    this.emit();
+  }
+
   ungateSurface(surfaceId: string): void {
     this.gated.delete(surfaceId);
   }
@@ -130,9 +159,18 @@ export class DiffRouter {
    * for every surface that received shadow messages.
    */
   route(messages: A2uiMessage[], opts?: { bypassGate?: boolean }): void {
-    const filtered = this.hooks.onBeforeApply
-      ? this.hooks.onBeforeApply(messages, {})
-      : messages;
+    // Build the RBAC/audit context the hook expects (was previously always empty).
+    const surfaceIds: string[] = [];
+    for (const m of messages) {
+      const s = surfaceIdOf(m);
+      if (s && !surfaceIds.includes(s)) surfaceIds.push(s);
+    }
+    const ctx: ApplyContext = {
+      surfaceId: surfaceIds.length === 1 ? surfaceIds[0] : undefined,
+      surfaceIds,
+      bypassGate: opts?.bypassGate ?? false,
+    };
+    const filtered = this.hooks.onBeforeApply ? this.hooks.onBeforeApply(messages, ctx) : messages;
     if (!filtered || filtered.length === 0) return;
 
     const liveBatch: A2uiMessage[] = [];
@@ -151,7 +189,20 @@ export class DiffRouter {
       }
     }
 
-    if (liveBatch.length > 0) this.live.processMessages(liveBatch);
+    if (liveBatch.length > 0) {
+      this.live.processMessages(liveBatch);
+      // If a live mutation (e.g. a `bypassGate` user edit) touched a surface that
+      // already has a pending shadow diff, the diff baseline has drifted: the diff
+      // was computed against the old live, but approve() will replay buffered
+      // messages onto the new live — preview would no longer match applied. Re-base
+      // the pending diff against the new live so the two stay in lockstep (C3).
+      const liveTouched = new Set<string>();
+      for (const m of liveBatch) {
+        const s = surfaceIdOf(m);
+        if (s && this.pending.has(s)) liveTouched.add(s);
+      }
+      for (const sid of liveTouched) this.rebasePending(sid);
+    }
 
     for (const [sid, batch] of shadowBatchBySurface) {
       // Gating a MODIFICATION to a surface that exists only in `live` (created or
@@ -192,7 +243,9 @@ export class DiffRouter {
     if (this.shadow.model.getSurface(surfaceId)) {
       this.shadow.model.deleteSurface(surfaceId);
     }
-    this.gated.delete(surfaceId);
+    // NOTE: do NOT un-gate here. Gating is a property of the surface (the consumer
+    // owns it via gate/ungateSurface); auto-ungating on resolve would let the next
+    // agent message land straight on live, silently bypassing the diff engine.
     if (!diffIsEmpty(entry.diff)) this.hooks.onApprove?.(entry.diff);
     this.emit();
   }
@@ -208,7 +261,7 @@ export class DiffRouter {
     if (this.shadow.model.getSurface(surfaceId)) {
       this.shadow.model.deleteSurface(surfaceId);
     }
-    this.gated.delete(surfaceId);
+    // Keep the surface gated (see approve()): the consumer owns gating lifetime.
     if (!diffIsEmpty(entry.diff)) this.hooks.onReject?.(entry.diff);
     this.emit();
   }

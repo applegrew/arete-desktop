@@ -23,7 +23,11 @@ export interface DiffOverlayProps {
 }
 
 export function DiffOverlay({ router, surfaceId, title, placement = 'overlay', children }: DiffOverlayProps) {
-  injectDiffStyles();
+  // Inject styles as a commit-time side effect, not during render (render must be
+  // pure). injectDiffStyles is idempotent, so this stays a no-op after the first.
+  useEffect(() => {
+    injectDiffStyles();
+  }, []);
 
   useSyncExternalStore(
     (cb) => router.subscribe(cb),
@@ -103,6 +107,14 @@ export function DiffOverlay({ router, surfaceId, title, placement = 'overlay', c
               kind="changed"
             />
           ))}
+          {pending.diff.moved.map((id) => (
+            <ComponentBox
+              key={`m-${id}`}
+              rect={rects.current.get(id)}
+              containerRect={containerRect}
+              kind="moved"
+            />
+          ))}
           {pending.diff.removed.map((id) => (
             <ComponentBox
               key={`r-${id}`}
@@ -134,13 +146,13 @@ export function DiffOverlay({ router, surfaceId, title, placement = 'overlay', c
 interface ComponentBoxProps {
   rect: DOMRect | undefined;
   containerRect: DOMRect;
-  kind: 'added' | 'changed' | 'removed';
+  kind: 'added' | 'changed' | 'removed' | 'moved';
 }
 
 function ComponentBox({ rect, containerRect, kind }: ComponentBoxProps) {
   if (!rect) return null;
   const palette = diffPalette[kind];
-  const borderStyle = kind === 'added' ? 'dashed' : 'solid';
+  const borderStyle = kind === 'added' || kind === 'moved' ? 'dashed' : 'solid';
   const isChanged = kind === 'changed';
   return (
     <div

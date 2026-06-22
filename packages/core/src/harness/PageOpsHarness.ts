@@ -147,6 +147,9 @@ export class PageOpsHarness {
       // it (NOT silently): the consumer surfaces it to the user AND feeds it back to
       // the agent, so the next turn can correct — page ops behave like tool calls.
       const message = err instanceof Error ? err.message : String(err);
+      // Always surface the drop (even when no onOpError is wired) so a malformed op
+      // isn't silently lost — silence reads as "applied" when it wasn't.
+      console.warn(`[arete] dropped page op "${op?.name}" on page "${pageId}": ${message}`);
       this.hooks.onOpError?.({ pageId, op, message });
       return;
     }
@@ -222,5 +225,11 @@ function runOp(
       return applyMoveSurface(prev, op);
     case 'setPageRegion':
       return applySetPageRegion(prev, op);
+    default:
+      // Runtime guard: op data originates from the agent and isn't type-checked.
+      // An unrecognized op must be rejected (→ caught, warned, dropped) rather than
+      // returning undefined and crashing on `next.layout`, and so it can never reach
+      // a live region — the core-level enforcement of the routing rule.
+      throw new Error(`Unknown page op "${(op as { name?: string }).name}"`);
   }
 }

@@ -14,18 +14,30 @@ export interface PinSurfaceResult {
 
 /**
  * Pure reducer. Returns the next mapping with the surface placed at:
- *   1. `op.region` if explicitly provided
+ *   1. `op.region` if explicitly provided — which MUST exist and be free, otherwise
+ *      throws (consistent with moveSurface: an explicit target is a hard request).
  *   2. otherwise the first EMPTY region in `layout.regions` order
- *   3. otherwise the first region (replacing its occupant)
+ *   3. otherwise the first region (displacing its occupant — last resort for a
+ *      single-region dock where there is no empty region to fall back to)
  *
- * Pin intent wins: if the chosen region is already occupied by a DIFFERENT surface,
- * that surface is displaced (unpinned — it falls back to the chat scroll) rather
- * than the pin being dropped. This matches "add it to page" on a single-region dock
- * page, where there is no empty region to fall back to. Throws only if the layout
- * has no regions at all. Layout is unchanged.
+ * Throws if the layout has no regions, or if an explicit region is missing/occupied.
+ * Layout is unchanged.
  */
 export function applyPinSurface(input: PinSurfaceInput, op: PinSurfaceOp): PinSurfaceResult {
   const used = new Set(Object.values(input.mapping));
+  if (op.region) {
+    // Explicit target: don't silently displace — fail loudly like moveSurface so
+    // chained ops compose predictably and nothing is silently knocked off the page.
+    if (!input.layout.regions.some((r) => r.id === op.region)) {
+      throw new Error(`Region "${op.region}" does not exist on page "${op.pageId}"`);
+    }
+    const occupant = Object.entries(input.mapping).find(
+      ([sid, rid]) => rid === op.region && sid !== op.surfaceId,
+    );
+    if (occupant) {
+      throw new Error(`Region "${op.region}" is already occupied on page "${op.pageId}"`);
+    }
+  }
   const target =
     op.region ??
     input.layout.regions.find((r) => !used.has(r.id))?.id ??
