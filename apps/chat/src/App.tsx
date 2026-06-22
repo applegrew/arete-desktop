@@ -942,10 +942,19 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
       const tools = new Proxy(
         {},
         {
-          get: (_t, name: string) => async (args?: unknown) => {
-            const result = await callMcpTool(name, args, controller.signal);
-            toolShapes.set(name, describeShape(result));
-            return result;
+          get: (_t, name: string | symbol) => {
+            // Don't return a callable for `then`/symbol/internal probes: otherwise the
+            // proxy looks thenable and any accidental `await tools` (or a handler that
+            // returns it) fires a spurious backend call with name "then". Returning
+            // undefined makes such access a normal no-op / ReferenceError instead.
+            if (typeof name !== 'string' || name === 'then' || name === 'catch' || name === 'finally') {
+              return undefined;
+            }
+            return async (args?: unknown) => {
+              const result = await callMcpTool(name, args, controller.signal);
+              toolShapes.set(name, describeShape(result));
+              return result;
+            };
           },
         },
       ) as Record<string, (args?: unknown) => Promise<unknown>>;

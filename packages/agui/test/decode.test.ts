@@ -90,7 +90,7 @@ describe('AgUiDecoder', () => {
     ]);
     expect(h.onRunStarted).toHaveBeenCalledWith({ threadId: 't1', runId: 'r1' });
     expect(h.onToolCallStart).toHaveBeenCalledWith({ toolCallId: 'c1', toolCallName: 'search' });
-    expect(h.onToolResult).toHaveBeenCalledWith({ toolCallId: 'c1', content: 'ok' });
+    expect(h.onToolResult).toHaveBeenCalledWith({ toolCallId: 'c1', content: 'ok', isError: false });
     expect(h.onToolCallEnd).toHaveBeenCalledWith({ toolCallId: 'c1' });
     expect(h.onRunFinished).toHaveBeenCalledOnce();
     expect(h.onRunError).not.toHaveBeenCalled();

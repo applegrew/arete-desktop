@@ -98,9 +98,14 @@ export class AgUiDecoder {
         h.onRunStarted?.({ threadId: e.threadId as string, runId: e.runId as string });
         break;
       case EventType.RUN_FINISHED:
+        // Deliver any still-open assistant text BEFORE signalling completion — a
+        // run can finish without a TEXT_MESSAGE_END, and onTextEnd is the only path
+        // that surfaces the accumulated text, so otherwise it would be lost.
+        this.flushOpenText();
         h.onRunFinished?.({ result: e.result });
         break;
       case EventType.RUN_ERROR:
+        this.flushOpenText();
         h.onRunError?.({ message: String(e.message ?? 'agent run error'), code: e.code as string });
         break;
 
@@ -172,5 +177,24 @@ export class AgUiDecoder {
   /** Feed many events in order. */
   handleAll(events: BaseEvent[]): void {
     for (const event of events) this.handle(event);
+  }
+
+  /**
+   * Deliver and clear any assistant text buffers that never received a
+   * TEXT_MESSAGE_END. Idempotent. Call on run completion or when the underlying
+   * stream closes so streamed text is never silently dropped.
+   */
+  flushOpenText(): void {
+    if (this.textBuffers.size === 0) return;
+    const pending = [...this.textBuffers.entries()];
+    this.textBuffers.clear();
+    for (const [messageId, text] of pending) {
+      if (text.length > 0) this.handlers.onTextEnd?.({ messageId, text });
+    }
+  }
+
+  /** Signal the stream has closed: flush any open text so nothing is lost. */
+  end(): void {
+    this.flushOpenText();
   }
 }

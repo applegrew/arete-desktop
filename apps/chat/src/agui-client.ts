@@ -26,28 +26,60 @@ async function streamSse(
   const reader = res.body.getReader();
   const textDecoder = new TextDecoder();
   let buffer = '';
+  // Whatever happens (normal end, abort, error), flush any assistant text the
+  // decoder is still buffering so a missing TEXT_MESSAGE_END can't drop the reply.
+  let ended = false;
+  const endDecoder = () => {
+    if (!ended) {
+      ended = true;
+      decoder.end();
+    }
+  };
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += textDecoder.decode(value, { stream: true });
+  // Per SSE spec, a single event's payload may span multiple `data:` lines that
+  // must be JOINED with "\n" and parsed ONCE — parsing each line separately
+  // corrupts any event whose JSON spans lines (large emissions, multi-line code).
+  const dispatchFrame = (frame: string) => {
+    const dataLines: string[] = [];
+    for (const raw of frame.split('\n')) {
+      const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+      if (!line.startsWith('data:')) continue; // skip comments / other SSE fields
+      // Strip "data:" and at most one optional leading space.
+      dataLines.push(line.slice(5).replace(/^ /, ''));
+    }
+    if (dataLines.length === 0) return;
+    const json = dataLines.join('\n').trim();
+    if (!json) return;
+    try {
+      decoder.handle(JSON.parse(json));
+    } catch {
+      if (typeof console !== 'undefined') console.warn('[agui] dropped malformed SSE frame');
+    }
+  };
 
-    // SSE frames are separated by a blank line.
-    let sep: number;
-    while ((sep = buffer.indexOf('\n\n')) >= 0) {
-      const frame = buffer.slice(0, sep);
-      buffer = buffer.slice(sep + 2);
-      for (const line of frame.split('\n')) {
-        if (!line.startsWith('data:')) continue;
-        const json = line.slice(line.indexOf(':') + 1).trim();
-        if (!json) continue;
-        try {
-          decoder.handle(JSON.parse(json));
-        } catch {
-          /* ignore malformed frame */
-        }
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += textDecoder.decode(value, { stream: true });
+
+      // SSE frames are separated by a blank line (handle CRLF too).
+      let sep: number;
+      while ((sep = buffer.search(/\r?\n\r?\n/)) >= 0) {
+        const match = buffer.slice(sep).match(/^\r?\n\r?\n/)![0];
+        dispatchFrame(buffer.slice(0, sep));
+        buffer = buffer.slice(sep + match.length);
       }
     }
+
+    // Flush any bytes the streaming decoder is holding, then dispatch a final
+    // frame the server didn't blank-line-terminate (otherwise the last event —
+    // often RUN_FINISHED / the final emission — would be silently dropped).
+    buffer += textDecoder.decode();
+    if (buffer.trim().length > 0) dispatchFrame(buffer);
+  } finally {
+    // Normal end, abort, or error: never leave buffered assistant text undelivered.
+    endDecoder();
   }
 }
 
