@@ -83,8 +83,20 @@ export function Shell({
   }));
   const current = state ?? internalState;
 
+  // Optimistic mirror of the effective state. In controlled mode `setState` only
+  // emits `onStateChange` and relies on the consumer echoing it back into `state`;
+  // if that round-trip is async/debounced, synchronous successive updates (e.g. the
+  // activation auto-switch below) would each compute from a stale base and clobber
+  // one another. Advancing this ref on every emit lets them compose; it resyncs to
+  // the prop whenever the controlled value actually advances.
+  const optimisticRef = useRef<ShellState>(current);
+  useEffect(() => {
+    optimisticRef.current = current;
+  }, [current]);
+
   const setState = useCallback(
     (next: ShellState) => {
+      optimisticRef.current = next;
       if (state) {
         onStateChange?.(next);
       } else {
@@ -106,8 +118,6 @@ export function Shell({
 
   // Refs keep the long-lived activation subscription free of stale closures
   // (and avoid resubscribing on every controlled-state update).
-  const currentRef = useRef(current);
-  currentRef.current = current;
   const setStateRef = useRef(setState);
   setStateRef.current = setState;
   const pageToTabRef = useRef(pageToTab);
@@ -115,12 +125,14 @@ export function Shell({
 
   // Auto-switch to the tab hosting a page when a page op targets it while
   // inactive. Switching mounts the <Page>, which registers and flushes the op.
+  // Reads `optimisticRef` (not the possibly-lagging controlled prop) so several
+  // activations firing before the consumer echoes state back still compose.
   useEffect(() => {
     if (!harness) return;
     return harness.subscribeActivation((pageId) => {
       const tabId = pageToTabRef.current.get(pageId) ?? pageId;
-      if (currentRef.current.activeTabId === tabId) return;
-      setStateRef.current({ ...currentRef.current, activeTabId: tabId });
+      if (optimisticRef.current.activeTabId === tabId) return;
+      setStateRef.current({ ...optimisticRef.current, activeTabId: tabId });
     });
   }, [harness]);
 

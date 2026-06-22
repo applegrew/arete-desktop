@@ -6,7 +6,7 @@ import {
   type TranscriptOptions,
 } from '../agent/transcript';
 
-export type ChatRole = 'user' | 'agent' | 'system' | 'thought' | 'tool' | 'action' | 'script-diff';
+export type ChatRole = 'user' | 'agent' | 'system' | 'thought' | 'tool' | 'action' | 'script-diff' | 'surface-moved';
 
 export interface ChatEntry {
   id: string;
@@ -28,6 +28,8 @@ export interface ChatEntry {
   oldCode?: string;
   newCode?: string;
   scriptEvent?: string;
+  /** When role === 'surface-moved', the id of the entry the surface was moved to. */
+  movedToEntryId?: string;
 }
 
 type Listener = () => void;
@@ -88,26 +90,57 @@ export class ChatStore {
 
   /** Move an existing surface entry to the end of the list (or push a new one). Returns the entry. */
   upsertSurface(surfaceId: string, patch: Omit<ChatEntry, 'id' | 'createdAt' | 'surfaceId'>): ChatEntry {
-    const idx = this.entries.findIndex((e) => e.surfaceId === surfaceId);
-    if (idx >= 0) {
-      const e = this.entries[idx]!;
-      const moved: ChatEntry = {
-        id: e.id,
-        role: patch.role,
-        text: patch.text,
+    // Match the real surface entry only — never a `surface-moved` placeholder, which
+    // shares this surfaceId and would otherwise be picked up by findIndex.
+    const isPlaceholderFor = (e: ChatEntry) => e.role === 'surface-moved' && e.surfaceId === surfaceId;
+    const idx = this.entries.findIndex((e) => e.surfaceId === surfaceId && e.role !== 'surface-moved');
+    if (idx < 0) {
+      // No live surface entry. Drop any stale placeholder for it before pushing fresh.
+      const cleaned = this.entries.filter((e) => !isPlaceholderFor(e));
+      if (cleaned.length !== this.entries.length) {
+        this.entries = cleaned;
+      }
+      return this.push({ ...patch, surfaceId });
+    }
+
+    const existing = this.entries[idx]!;
+    const moved: ChatEntry = {
+      id: existing.id,
+      role: patch.role,
+      text: patch.text,
+      surfaceId,
+      toolName: patch.toolName,
+      toolResult: patch.toolResult,
+      toolError: patch.toolError,
+      actionLabel: patch.actionLabel,
+      pending: patch.pending,
+      createdAt: Date.now(),
+    };
+
+    // Is the surface already the last *real* entry? If so it isn't moving anywhere
+    // (hot streaming path): update in place and keep any existing placeholder that
+    // already marks where it moved from — don't add a new one.
+    const isAlreadyLast = !this.entries.slice(idx + 1).some((e) => e.role !== 'surface-moved');
+
+    if (isAlreadyLast) {
+      this.entries = this.entries.map((e, i) => (i === idx ? moved : e));
+    } else {
+      // Displacing the surface to the end: drop any prior placeholder for it and
+      // leave exactly one where it used to be, so placeholders never accumulate.
+      const rest = this.entries.filter((e, i) => i !== idx && !isPlaceholderFor(e));
+      const placeholder: ChatEntry = {
+        id: uid('mvd'),
+        role: 'surface-moved',
+        text: 'Moved below',
         surfaceId,
-        toolName: patch.toolName,
-        toolResult: patch.toolResult,
-        toolError: patch.toolError,
-        actionLabel: patch.actionLabel,
-        pending: patch.pending,
+        movedToEntryId: moved.id,
         createdAt: Date.now(),
       };
-      this.entries = [...this.entries.slice(0, idx), ...this.entries.slice(idx + 1), moved];
-      this.emit();
-      return moved;
+      const beforeCount = this.entries.slice(0, idx).filter((e) => !isPlaceholderFor(e)).length;
+      this.entries = [...rest.slice(0, beforeCount), placeholder, ...rest.slice(beforeCount), moved];
     }
-    return this.push({ ...patch, surfaceId });
+    this.emit();
+    return moved;
   }
 
   clear(): void {

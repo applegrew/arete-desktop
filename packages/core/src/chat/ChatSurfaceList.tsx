@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useState, useRef, useMemo, useEffect, useLayoutEffect } from 'react';
+import { useState, useRef, useMemo, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useChatEntries, type ChatStore } from './ChatStore';
 
 export interface ChatSurfaceListProps {
@@ -68,6 +68,27 @@ export function ChatSurfaceList({ store, renderSurface, onApproveScript, onRejec
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastUserId]);
+
+  const [highlightedEntryId, setHighlightedEntryId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scrollToEntry = useCallback((entryId: string) => {
+    setHighlightedEntryId(entryId);
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => setHighlightedEntryId(null), 2400);
+    const ol = olRef.current;
+    if (!ol) return;
+    const el = ol.querySelector<HTMLElement>(`[data-entry-id="${cssEscape(entryId)}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, []);
+
+  // Clear any pending highlight timer on unmount to avoid a state update on an
+  // unmounted component (tab switch / dock collapse / workspace switch).
+  useEffect(() => () => {
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+  }, []);
 
   if (entries.length === 0) {
     return (
@@ -189,7 +210,51 @@ export function ChatSurfaceList({ store, renderSurface, onApproveScript, onRejec
             </li>
           );
         }
+        if (entry.role === 'surface-moved') {
+          const targetId = entry.movedToEntryId;
+          return (
+            <li
+              key={entry.id}
+              data-entry-id={entry.id}
+              style={{
+                alignSelf: 'center',
+                width: '92%',
+                animation: 'glass-rise 0.3s ease both',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => { if (targetId) scrollToEntry(targetId); }}
+                title={targetId ? 'Scroll to moved surface' : undefined}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  background: 'rgba(124,131,255,0.06)',
+                  border: '1px dashed var(--glass-border-2, rgba(124,131,255,0.25))',
+                  borderRadius: 12,
+                  padding: '8px 12px',
+                  color: 'var(--text-dim, #8b9cc7)',
+                  cursor: targetId ? 'pointer' : 'default',
+                  fontSize: 12,
+                  fontFamily: 'inherit',
+                  textAlign: 'left',
+                }}
+              >
+                <span aria-hidden style={{ fontSize: 13 }}>↧</span>
+                <span style={{ flex: 1, color: 'var(--text-faint, #888)', fontStyle: 'italic' }}>
+                  Surface moved below · click to show
+                </span>
+                <span style={{ color: 'var(--accent-2, #22d3ee)', fontSize: 11.5, fontWeight: 500 }}>
+                  Show ↗
+                </span>
+              </button>
+            </li>
+          );
+        }
         const isUser = entry.role === 'user';
+        const isHighlighted = highlightedEntryId === entry.id;
         return (
           <li
             key={entry.id}
@@ -200,7 +265,9 @@ export function ChatSurfaceList({ store, renderSurface, onApproveScript, onRejec
                 : 'var(--glass-2, #1f2937)',
               backdropFilter: 'var(--blur)',
               WebkitBackdropFilter: 'var(--blur)',
-              border: isUser ? '1px solid rgba(124,131,255,0.4)' : '1px solid var(--glass-border, transparent)',
+              border: isHighlighted
+                ? '1.5px solid rgba(34,211,238,0.35)'
+                : isUser ? '1px solid rgba(124,131,255,0.4)' : '1px solid var(--glass-border, transparent)',
               padding: '10px 14px',
               borderRadius: 16,
               borderBottomRightRadius: isUser ? 5 : 16,
@@ -210,9 +277,12 @@ export function ChatSurfaceList({ store, renderSurface, onApproveScript, onRejec
               color: 'var(--text)',
               alignSelf: isUser ? 'flex-end' : 'flex-start',
               maxWidth: '86%',
-              boxShadow: isUser
-                ? '0 8px 24px -10px rgba(124,131,255,0.6), inset 0 1px 0 rgba(255,255,255,0.18)'
-                : 'var(--shadow), inset 0 1px 0 rgba(255,255,255,0.07)',
+              boxShadow: isHighlighted
+                ? '0 0 32px 6px rgba(34,211,238,0.45), inset 0 0 20px 2px rgba(34,211,238,0.12)'
+                : isUser
+                  ? '0 8px 24px -10px rgba(124,131,255,0.6), inset 0 1px 0 rgba(255,255,255,0.18)'
+                  : 'var(--shadow), inset 0 1px 0 rgba(255,255,255,0.07)',
+              transition: 'border-color 0.5s ease, box-shadow 0.5s ease',
               animation: 'glass-rise 0.32s cubic-bezier(0.22,1,0.36,1) both',
             }}
           >

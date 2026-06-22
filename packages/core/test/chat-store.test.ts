@@ -31,3 +31,39 @@ describe('ChatStore.removeBySurfaceId', () => {
     expect(calls).toBe(1);
   });
 });
+
+describe('ChatStore.upsertSurface', () => {
+  const placeholders = (s: ChatStore) => s.getSnapshot().filter((e) => e.role === 'surface-moved');
+
+  it('does not accumulate placeholders across repeated streaming updates (R1)', () => {
+    const s = new ChatStore();
+    s.upsertSurface('sfc-1', { role: 'agent', text: 'card' });
+    s.push({ role: 'agent', text: 'reply below' }); // something now sits below the surface
+    // Stream several updates to the same surface.
+    for (let i = 0; i < 5; i++) s.upsertSurface('sfc-1', { role: 'agent', text: `card v${i}` });
+    // At most one placeholder for the moved surface — not one per update.
+    expect(placeholders(s).filter((e) => e.surfaceId === 'sfc-1')).toHaveLength(1);
+  });
+
+  it('upserts the real surface entry, never a placeholder (R4)', () => {
+    const s = new ChatStore();
+    const first = s.upsertSurface('sfc-1', { role: 'agent', text: 'card' });
+    s.push({ role: 'agent', text: 'reply below' });
+    const moved = s.upsertSurface('sfc-1', { role: 'agent', text: 'card v2' });
+    // Same logical surface entry id is preserved, content updated, placeholder points to it.
+    expect(moved.id).toBe(first.id);
+    expect(moved.text).toBe('card v2');
+    const ph = placeholders(s).find((e) => e.surfaceId === 'sfc-1');
+    expect(ph?.movedToEntryId).toBe(moved.id);
+    // The real surface entry is the last entry, not a placeholder.
+    const snap = s.getSnapshot();
+    expect(snap[snap.length - 1]!.id).toBe(moved.id);
+  });
+
+  it('leaves no placeholder when the surface is already last (streaming hot path)', () => {
+    const s = new ChatStore();
+    s.upsertSurface('sfc-1', { role: 'agent', text: 'card' });
+    s.upsertSurface('sfc-1', { role: 'agent', text: 'card v2' });
+    expect(placeholders(s)).toHaveLength(0);
+  });
+});
