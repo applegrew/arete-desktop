@@ -15,10 +15,9 @@ import {
   ActionHarness,
   RenderDiagnosticsStore,
   resolveStaticChips,
-  DASHBOARD_PAGE_ID,
-  DASHBOARD_PAGE_TITLE,
   type RenderDiagnostic,
   type SystemActions,
+  type DiscoveryChip,
   withComponentIds,
   buildAgentContext,
   deriveSurfaceLabel,
@@ -227,6 +226,9 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
 
   // Busy = at least one agent turn in-flight; toggles the chat Send button to Cancel.
   const [busyCount, setBusyCount] = useState(0);
+  // Agent-suggested discovery chips from the latest turn. When empty, the chip bar
+  // falls back to the curated static set (reactive to the current page roster).
+  const [agentChips, setAgentChips] = useState<DiscoveryChip[]>([]);
   const abortControllersRef = useRef<Set<AbortController>>(new Set());
   const cancelPrompt = useCallback(() => {
     for (const c of abortControllersRef.current) c.abort();
@@ -412,6 +414,16 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
   );
 
   const systemActions = useMemo<SystemActions>(() => ({ createPage: handleCreatePage }), [handleCreatePage]);
+
+  // Chips shown above the chat input: the agent's latest suggestions when present,
+  // else the curated static set (conditional chips react to the current page roster).
+  const discoveryChips = useMemo<DiscoveryChip[]>(
+    () =>
+      agentChips.length > 0
+        ? agentChips
+        : resolveStaticChips({ pages: pages.map((p) => ({ id: p.id, title: p.title })) }),
+    [agentChips, pages],
+  );
 
   const updatePageLocal = useCallback(
     (id: string, patch: Partial<ApiPage>) => {
@@ -613,14 +625,6 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
         });
       }
 
-      // 3b. On a fresh (empty) chat, seed curated discovery chips so users can find
-      //     advanced capabilities. Each is pure prompt-injection on click; conditional
-      //     chips (e.g. "create a dashboard") are hidden if that page already exists.
-      if (chat.length === 0) {
-        const chips = resolveStaticChips({ pages: ps.map((p) => ({ id: p.id, title: p.title })) });
-        if (chips.length > 0) chatStore.push({ role: 'chips', chips });
-      }
-
       // 4. Per-workspace UI state (active tab + chat dock) is seeded into shellState
       //    from the workspace record via props — no separate load needed.
       getAgentHealth()
@@ -636,18 +640,13 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
   useEffect(() => {
     if (!hydrated) return;
     const t = setTimeout(() => {
-      const entries = chatStore
-        .getSnapshot()
-        // 'chips' rows are ephemeral discovery nudges (no persisted `chips` field) —
-        // don't save them, so they never restore empty and the empty-chat seed still fires.
-        .filter((e) => e.role !== 'chips')
-        .map((e) => ({
-          id: e.id,
-          role: e.role,
-          text: e.text ?? '',
-          surfaceId: e.surfaceId,
-          createdAt: e.createdAt,
-        }));
+      const entries = chatStore.getSnapshot().map((e) => ({
+        id: e.id,
+        role: e.role,
+        text: e.text ?? '',
+        surfaceId: e.surfaceId,
+        createdAt: e.createdAt,
+      }));
       saveChat(workspaceId, entries).catch(() => {});
     }, 1500);
     return () => clearTimeout(t);
@@ -756,6 +755,9 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
       const controller = new AbortController();
       abortControllersRef.current.add(controller);
       setBusyCount((c) => c + 1);
+      // Clear last turn's agent chips; this turn may emit fresh ones, else the chip
+      // bar falls back to the static set.
+      setAgentChips([]);
 
       const askingEntry = chatStore.push({ role: 'system', text: 'Asking the agent', pending: true });
       let cleared = false;
@@ -878,7 +880,7 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
           },
           onDiscoveryChips: (chips) => {
             clearAsking();
-            if (chips.length > 0) chatStore.push({ role: 'chips', chips });
+            setAgentChips(chips);
           },
           onRunError: ({ message }) => {
             clearAsking();
@@ -1268,7 +1270,7 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
             </button>
           </div>
         }
-        hooks={{ onPrompt: handlePrompt, busy: busyCount > 0, onCancelPrompt: cancelPrompt }}
+        hooks={{ onPrompt: handlePrompt, busy: busyCount > 0, onCancelPrompt: cancelPrompt, discoveryChips }}
         chatStore={chatStore}
         pendingByTabId={pendingByTabId}
         actionHarness={actionHarness}

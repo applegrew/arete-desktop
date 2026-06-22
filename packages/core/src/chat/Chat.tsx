@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useHooks } from '../shell/HookContext';
 import { ChatSurfaceList } from './ChatSurfaceList';
 import { ChatInput } from './ChatInput';
+import { DiscoveryChipsBar } from './DiscoveryChipsBar';
 import type { ChatStore } from './ChatStore';
 
 export type ChatMode = 'page' | 'dock' | 'rail';
@@ -136,8 +137,8 @@ export function Chat({ store, mode, onModeChange, renderSurface, onApproveScript
         onApproveScript={onApproveScript}
         onRejectScript={onRejectScript}
         onLocateSurface={onLocateSurface}
-        onChipClick={handleSubmit}
       />
+      <DiscoveryChipsBar chips={hooks.discoveryChips ?? []} onChipClick={handleSubmit} />
       <ChatInput onSubmit={handleSubmit} busy={hooks.busy} onCancel={hooks.onCancelPrompt} />
     </section>
   );

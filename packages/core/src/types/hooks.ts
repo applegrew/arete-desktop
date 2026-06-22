@@ -5,6 +5,12 @@ import type { OnUserAction } from './action';
 
 export type { UserAction, ActionSpec, OnUserAction } from './action';
 
+/** A discovery chip: clicking it submits `prompt` as if the user typed it. */
+export interface DiscoveryChip {
+  label: string;
+  prompt: string;
+}
+
 export type Diff = ContentDiff | PageDiff;
 
 export interface HookContextValue {
@@ -16,6 +22,8 @@ export interface HookContextValue {
   busy?: boolean;
   /** Abort the in-flight agent turn(s). Wired to the chat input's Cancel button. */
   onCancelPrompt?: () => void;
+  /** Discovery chips shown just above the chat input; clicking one submits its prompt. */
+  discoveryChips?: DiscoveryChip[];
   onPageOp: OnPageOp;
   onProposed: OnProposed;
   onApprove: OnApprove;
