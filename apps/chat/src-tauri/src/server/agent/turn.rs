@@ -9,6 +9,7 @@ use super::prompt::build_system_prompt;
 use super::schema::envelope_schema;
 use super::skills::{load_skills, render_skills_for_prompt};
 use super::sse::Sink;
+use crate::server::db;
 use crate::server::state::AppState;
 
 /// Max corrective re-asks (shared budget across parse + domain failures).
@@ -51,7 +52,15 @@ pub async fn run_agent_turn(
     tool_infos.extend(builtin_tools(ctx));
 
     let skills = render_skills_for_prompt(&load_skills(&state.skills_dir()));
-    let cached_hints = HashMap::new(); // TODO Phase 2: load from persistence
+    // Load display hints accumulated from prior turns so the agent gets field-level
+    // guidance for tools it has already called (persisted in app_state).
+    let cached_hints: HashMap<String, DisplayHint> = {
+        let conn = state.db_lock();
+        db::get_state(&conn)
+            .ok()
+            .and_then(|m| m.get(display_hints::HINTS_STATE_KEY).map(display_hints::hints_from_value))
+            .unwrap_or_default()
+    };
     let system = format!("{}{}", build_system_prompt(ctx, &tool_infos, &cached_hints), skills);
 
     let history_len = body.get("messages").and_then(|m| m.as_array()).map(|a| a.len()).unwrap_or(0);
@@ -88,6 +97,22 @@ pub async fn run_agent_turn(
     // guidance for the tools it just called BEFORE building the UI envelope.
     if let Some(hint_text) = display_hints::format_hints_turn(&current_hints) {
         convo.push(json!({ "role": "system", "content": hint_text }));
+    }
+
+    // Persist this turn's hints (merged over the cached set) so later turns inherit
+    // field-level guidance for tools called in earlier turns.
+    if !current_hints.is_empty() {
+        let mut merged = cached_hints.clone();
+        for (k, v) in &current_hints {
+            merged.insert(k.clone(), v.clone());
+        }
+        let mut patch = Map::new();
+        patch.insert(
+            display_hints::HINTS_STATE_KEY.to_string(),
+            display_hints::hints_to_value(&merged),
+        );
+        let mut conn = state.db_lock();
+        let _ = db::set_state(&mut conn, &patch);
     }
 
     match run_with_correction(ollama, convo, ctx).await {
@@ -300,10 +325,22 @@ async fn run_with_correction(
                             .unwrap_or(false))
                 })
                 .collect();
+            // If stripping no-ops left nothing, the model failed to produce a real
+            // change despite being warned. Don't pass through a reply that may still
+            // claim success — reconcile it with what actually happened.
+            let reply = if cleaned.is_empty() {
+                log_llm(json!({ "phase": "validation.noops.all_stripped", "surfaces": result.noops }));
+                Some(
+                    "I couldn't produce a change different from what's already shown, so nothing was updated."
+                        .to_string(),
+                )
+            } else {
+                env_str(&envelope, "reply")
+            };
             return Ok(Outcome {
                 validated: cleaned,
                 rationale: env_str(&envelope, "rationale"),
-                reply: env_str(&envelope, "reply"),
+                reply,
             });
         }
 

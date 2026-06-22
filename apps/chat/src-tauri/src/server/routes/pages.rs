@@ -15,7 +15,7 @@ pub async fn list(
     State(st): State<AppState>,
     Query(q): Query<WsQuery>,
 ) -> Result<Json<Vec<ApiPage>>, AppError> {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     Ok(Json(db::list_pages(&conn, &q.id())?))
 }
 
@@ -25,7 +25,7 @@ pub async fn create(
     Query(q): Query<WsQuery>,
     Json(body): Json<Value>,
 ) -> Result<Json<ApiPage>, AppError> {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     let ws = q.id();
     let b = body.as_object().cloned().unwrap_or_default();
     let now = now_ms();
@@ -67,7 +67,7 @@ pub async fn update(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<Response, AppError> {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     let cur = match db::get_page(&conn, &id)? {
         Some(p) => p,
         None => {
@@ -109,7 +109,7 @@ pub async fn remove(
     State(st): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     db::delete_page(&conn, &id)?;
     Ok(Json(json!({ "ok": true })))
 }

@@ -10,7 +10,7 @@ pub async fn list(
     State(st): State<AppState>,
     Query(q): Query<WsQuery>,
 ) -> Result<Json<Vec<ApiChatEntry>>, AppError> {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     Ok(Json(db::get_chat(&conn, &q.id())?))
 }
 
@@ -19,7 +19,7 @@ pub async fn save(
     Query(q): Query<WsQuery>,
     Json(entries): Json<Vec<ApiChatEntry>>,
 ) -> Result<Json<Value>, AppError> {
-    let mut conn = st.db.lock().unwrap();
+    let mut conn = st.db_lock();
     db::save_chat(&mut conn, &q.id(), &entries)?;
     Ok(Json(json!({ "ok": true })))
 }

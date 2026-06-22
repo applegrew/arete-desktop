@@ -10,7 +10,7 @@ use crate::server::{db, models::ApiWorkspace, short_uuid, state::AppState, AppEr
 
 /// GET /api/workspaces → `{ workspaces, activeWorkspaceId }`.
 pub async fn list(State(st): State<AppState>) -> Result<Json<Value>, AppError> {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     let workspaces = serde_json::to_value(db::list_workspaces(&conn)?)?;
     let active = db::get_active_workspace_id(&conn)?;
     Ok(Json(json!({
@@ -24,7 +24,7 @@ pub async fn create(
     State(st): State<AppState>,
     Json(body): Json<Value>,
 ) -> Result<Json<ApiWorkspace>, AppError> {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     let name = body
         .get("name")
         .and_then(|v| v.as_str())
@@ -41,7 +41,7 @@ pub async fn update(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<Response, AppError> {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     let name = body.get("name").and_then(|v| v.as_str());
     let active_tab = body.get("activeTabId").and_then(|v| v.as_str());
     let dock = body.get("chatDockState").and_then(|v| v.as_str());
@@ -57,7 +57,7 @@ pub async fn remove(
     State(st): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    let mut conn = st.db.lock().unwrap();
+    let mut conn = st.db_lock();
     if db::count_workspaces(&conn)? <= 1 {
         return Ok((
             StatusCode::BAD_REQUEST,
@@ -84,7 +84,7 @@ pub async fn activate(
     State(st): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     if db::get_workspace(&conn, &id)?.is_none() {
         return Ok((StatusCode::NOT_FOUND, Json(json!({ "error": "workspace not found" }))).into_response());
     }

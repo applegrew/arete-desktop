@@ -4,7 +4,7 @@ use serde_json::{Map, Value};
 use crate::server::{db, settings, state::AppState, AppError};
 
 pub async fn get(State(st): State<AppState>) -> Result<Json<Value>, AppError> {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     Ok(Json(settings::resolve_settings(&conn)?))
 }
 
@@ -14,7 +14,7 @@ pub async fn put(
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, AppError> {
     let patch: Map<String, Value> = body.as_object().cloned().unwrap_or_default();
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     db::save_settings(&conn, &patch)?;
     Ok(Json(settings::resolve_settings(&conn)?))
 }

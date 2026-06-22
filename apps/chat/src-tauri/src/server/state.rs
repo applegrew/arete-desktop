@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::agent::mcp::McpCache;
 use super::db;
@@ -34,5 +34,13 @@ impl AppState {
 
     pub fn skills_dir(&self) -> PathBuf {
         self.data_dir.join("skills")
+    }
+
+    /// Poison-tolerant DB lock. A panic while the guard is held would otherwise
+    /// poison the mutex and turn every subsequent `lock().unwrap()` into a panic,
+    /// permanently bricking all `/api` calls. The connection itself is unaffected
+    /// by an unrelated panic, so recovering the guard is safe here.
+    pub fn db_lock(&self) -> MutexGuard<'_, Connection> {
+        self.db.lock().unwrap_or_else(|e| e.into_inner())
     }
 }

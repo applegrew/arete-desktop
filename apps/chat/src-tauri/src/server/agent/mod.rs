@@ -53,7 +53,7 @@ impl<S: Stream + Unpin> Stream for GuardedStream<S> {
 
 /// Build an Ollama client from the live persisted settings (model + base URL).
 fn resolve_ollama(st: &AppState) -> Ollama {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     let s = settings::resolve_settings(&conn).unwrap_or_else(|_| json!({}));
     let model = s.get("model").and_then(|m| m.as_str()).unwrap_or("gemma4:31b-cloud");
     let url = s.get("ollamaUrl").and_then(|u| u.as_str()).unwrap_or("http://localhost:11434");

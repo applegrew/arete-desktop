@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use serde_json::{json, Value};
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 
 // AG-UI event type wire strings (must match @ag-ui/core's EventType enum values).
@@ -25,20 +26,28 @@ pub const ARETE_EMISSION_EVENT: &str = "arete.emission";
 /// byte-compatible with the old Node server (each payload gets a `timestamp`).
 pub struct Sink {
     tx: mpsc::Sender<Result<Bytes, io::Error>>,
+    /// Set once the receiver (client) has gone, so we stop doing per-frame work and
+    /// only log the disconnect once instead of swallowing every failed send silently.
+    closed: AtomicBool,
 }
 
 impl Sink {
     pub fn new(tx: mpsc::Sender<Result<Bytes, io::Error>>) -> Self {
-        Self { tx }
+        Self { tx, closed: AtomicBool::new(false) }
     }
 
     /// Send one event. `event` is a JSON object; a `timestamp` (ms epoch) is appended.
     pub async fn send(&self, mut event: Value) {
+        if self.closed.load(Ordering::Relaxed) {
+            return;
+        }
         if let Value::Object(ref mut map) = event {
             map.insert("timestamp".into(), json!(chrono::Utc::now().timestamp_millis()));
         }
         let frame = format!("data: {}\n\n", event);
-        let _ = self.tx.send(Ok(Bytes::from(frame))).await;
+        if self.tx.send(Ok(Bytes::from(frame))).await.is_err() && !self.closed.swap(true, Ordering::Relaxed) {
+            eprintln!("[arete] SSE client disconnected; dropping remaining frames for this turn");
+        }
     }
 
     pub async fn run_started(&self, thread_id: &str, run_id: &str) {

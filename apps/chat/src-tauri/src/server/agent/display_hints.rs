@@ -148,15 +148,55 @@ pub fn classify_tool_result(tool_name: &str, result_text: &str) -> Option<Displa
                 None
             }
         }
-        // Single object: classify its fields directly.
+        // Single object: try to find an array inside (common API wrappers like
+        // { results: [...] } or { data: { tickets: [...] } }), falling back to
+        // classifying the object's own keys if no array is found.
         Value::Object(obj) => {
             if obj.is_empty() {
                 return None;
             }
-            Some(classify_from_obj(tool_name, false, 1, obj))
+            classify_object(tool_name, obj)
         }
         _ => None,
     }
+}
+
+/// Classify a top-level object. First try to find an array of records inside
+/// (breadth-first up to depth 2), falling back to the object's own keys.
+fn classify_object(tool_name: &str, obj: &serde_json::Map<String, Value>) -> Option<DisplayHint> {
+    // Collect every candidate array-of-objects (depth 1 and depth 2) and pick the
+    // richest one, rather than the alphabetically-first. Map iteration is sorted
+    // (BTreeMap), so "first" would deterministically but wrongly prefer e.g.
+    // `attachments` over `results`. Rank by row count, then field count.
+    let mut candidates: Vec<(usize, usize, &serde_json::Map<String, Value>)> = Vec::new();
+
+    // Depth 1: direct array children.
+    for (_, v) in obj {
+        if let Value::Array(arr) = v {
+            if let Some(Value::Object(first)) = arr.first() {
+                candidates.push((arr.len(), first.len(), first));
+            }
+        }
+    }
+    // Depth 2: `{ key: { key: [...] } }`.
+    for (_, v) in obj {
+        if let Value::Object(inner) = v {
+            for (_, vv) in inner {
+                if let Value::Array(arr) = vv {
+                    if let Some(Value::Object(first)) = arr.first() {
+                        candidates.push((arr.len(), first.len(), first));
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(&(rows, _, first)) = candidates.iter().max_by_key(|(rows, fields, _)| (*rows, *fields)) {
+        return Some(classify_from_obj(tool_name, true, rows, first));
+    }
+
+    // No array found — classify the object's own keys (single-record result).
+    Some(classify_from_obj(tool_name, false, 1, obj))
 }
 
 fn classify_from_obj(
@@ -264,7 +304,13 @@ pub fn format_hints_prompt(hints: &HashMap<String, DisplayHint>) -> String {
             .to_string(),
     );
 
-    for (name, h) in hints {
+    // Sort by tool name so the injected block is stable across turns/runs
+    // (HashMap iteration order is randomized, which would defeat prompt-prefix
+    // caching and make LLM logs non-reproducible).
+    let mut names: Vec<&String> = hints.keys().collect();
+    names.sort();
+    for name in names {
+        let h = &hints[name];
         lines.push(format!("- {}:", name));
 
         if h.is_list {
@@ -342,6 +388,9 @@ pub fn format_hints_turn(hints: &HashMap<String, DisplayHint>) -> Option<String>
 
 // ---- persistence helpers (serialize to/from JSON Value) ------------------
 
+/// `app_state` key under which the accumulated per-tool display hints are stored.
+pub const HINTS_STATE_KEY: &str = "displayHints";
+
 pub fn hints_to_value(hints: &HashMap<String, DisplayHint>) -> Value {
     let obj: serde_json::Map<String, Value> = hints
         .iter()
@@ -403,5 +452,44 @@ mod tests {
         assert!(hint.hide_fields.iter().any(|f| f == "internal_product_id"));
         assert!(hint.badge_fields.contains(&"status".to_string()));
         assert!(hint.chart_dimensions.contains(&"category".to_string()));
+    }
+
+    #[test]
+    fn test_classify_wrapped_results() {
+        // Common pattern: { results: [{...}, {...}] }
+        let result = r#"{"results":[{"id":1,"name":"Widget","status":"active","description":"A widget","created_at":"2024-01-01","workspace_id":5}]}"#;
+        let hint = classify_tool_result("fetchItems", result).unwrap();
+        assert!(hint.is_list);
+        assert_eq!(hint.row_count, 1);
+        // should dive into results array, not classify the wrapper key "results"
+        assert!(hint.columns.iter().any(|c| c.field == "name"));
+        assert!(hint.badge_fields.contains(&"status".to_string()));
+        assert!(hint.hide_fields.iter().any(|f| f == "id"));
+        assert!(hint.hide_fields.iter().any(|f| f == "workspace_id"));
+        assert!(hint.detail_fields.contains(&"description".to_string()));
+    }
+
+    #[test]
+    fn test_classify_deeply_nested_results() {
+        // Common pattern: { data: { tickets: [...] } }
+        let result = r#"{"data":{"tickets":[{"id":1,"subject":"Bug","status":"open","priority":2}]}}"#;
+        let hint = classify_tool_result("fetchTickets", result).unwrap();
+        assert!(hint.is_list);
+        assert_eq!(hint.row_count, 1);
+        assert!(hint.columns.iter().any(|c| c.field == "subject"));
+        assert!(hint.badge_fields.contains(&"status".to_string()));
+        assert!(hint.badge_fields.contains(&"priority".to_string()));
+        assert!(hint.hide_fields.iter().any(|f| f == "id"));
+    }
+
+    #[test]
+    fn test_classify_envelope_with_extra_keys() {
+        // Pattern: { success: true, count: 5, data: [...] }
+        let result = r#"{"success":true,"count":5,"data":[{"id":1,"name":"Foo","price":9.99}]}"#;
+        let hint = classify_tool_result("search", result).unwrap();
+        assert!(hint.is_list);
+        assert_eq!(hint.row_count, 1);
+        assert!(hint.columns.iter().any(|c| c.field == "name"));
+        assert!(hint.chart_dimensions.contains(&"price".to_string()));
     }
 }

@@ -10,7 +10,7 @@ pub async fn list(
     State(st): State<AppState>,
     Query(q): Query<WsQuery>,
 ) -> Result<Json<Vec<ApiSurface>>, AppError> {
-    let conn = st.db.lock().unwrap();
+    let conn = st.db_lock();
     Ok(Json(db::list_surfaces(&conn, &q.id())?))
 }
 
@@ -20,7 +20,7 @@ pub async fn replace(
     Query(q): Query<WsQuery>,
     Json(surfaces): Json<Vec<ApiSurface>>,
 ) -> Result<Json<Value>, AppError> {
-    let mut conn = st.db.lock().unwrap();
+    let mut conn = st.db_lock();
     db::replace_surfaces(&mut conn, &q.id(), &surfaces)?;
     Ok(Json(json!({ "ok": true })))
 }

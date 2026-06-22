@@ -11,8 +11,13 @@ use serde_json::{json, Value};
 use sse_stream::Sse;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::server::state::AppState;
+
+/// Per-server connect+list-tools timeout, so an unreachable or hanging MCP server
+/// can't stall the agent turn indefinitely (mirrors ollama.rs's health timeout).
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Wraps rmcp's reqwest HTTP client to tolerate a common non-compliant response:
 /// some MCP-over-HTTP servers answer notifications (e.g. `notifications/initialized`)
@@ -98,14 +103,14 @@ pub struct ToolOutcome {
 pub struct McpCache {
     key: String,
     initialized: bool,
-    services: Vec<ClientService>,
+    services: Vec<Arc<ClientService>>,
     tools: Vec<McpToolDef>,
     statuses: Vec<Value>,
 }
 
 /// Resolve enabled MCP servers from settings → [(name, entry)].
 fn resolve_servers(state: &AppState) -> Vec<(String, Value)> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.db_lock();
     let settings = super::super::settings::resolve_settings(&conn).unwrap_or_else(|_| json!({}));
     let arr = settings
         .get("mcpServers")
@@ -117,10 +122,18 @@ fn resolve_servers(state: &AppState) -> Vec<(String, Value)> {
         let enabled = s.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false);
         let name = s.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
         let entry = s.get("entry").cloned();
-        if enabled && !name.is_empty() {
-            if let Some(entry) = entry {
-                out.push((name, entry));
-            }
+        if !enabled {
+            continue;
+        }
+        // Warn (don't silently skip) when an enabled server is unusable due to a
+        // shape mismatch — otherwise the agent runs with zero MCP tools invisibly.
+        if name.is_empty() {
+            eprintln!("[arete] skipping enabled MCP server with no `name`: {s}");
+            continue;
+        }
+        match entry {
+            Some(entry) => out.push((name, entry)),
+            None => eprintln!("[arete] skipping enabled MCP server \"{name}\": missing `entry`"),
         }
     }
     out
@@ -249,9 +262,23 @@ pub async fn ensure(state: &AppState) {
     cache.tools.clear();
     cache.statuses.clear();
 
-    for (name, entry) in &servers {
+    // Connect to every server concurrently, each bounded by CONNECT_TIMEOUT, so one
+    // unreachable/hanging server can't stall the turn and N servers don't pay the
+    // sum of their connect latencies.
+    let conns = servers.iter().map(|(name, entry)| {
         let label = transport_label(entry);
-        match connect_and_list(entry).await {
+        async move {
+            let res = match tokio::time::timeout(CONNECT_TIMEOUT, connect_and_list(entry)).await {
+                Ok(r) => r,
+                Err(_) => Err(format!("connection timed out after {}s", CONNECT_TIMEOUT.as_secs())),
+            };
+            (name, label, res)
+        }
+    });
+    let results = futures::future::join_all(conns).await;
+
+    for (name, label, res) in results {
+        match res {
             Ok((service, tool_values)) => {
                 let server_idx = cache.services.len();
                 let mut names: Vec<String> = Vec::new();
@@ -276,7 +303,7 @@ pub async fn ensure(state: &AppState) {
                         server: server_idx,
                     });
                 }
-                cache.services.push(service);
+                cache.services.push(Arc::new(service));
                 cache.statuses.push(json!({
                     "name": name, "transport": label, "connected": true,
                     "toolCount": names.len(), "tools": names, "toolDetails": tool_details,
@@ -324,14 +351,33 @@ pub async fn tool_infos(state: &AppState) -> Vec<Value> {
 /// Execute a tool by name. Mirrors `adaptTool`: join text content, treat isError as
 /// failure, and extract MCP-UI resources.
 pub async fn call(state: &AppState, name: &str, args: Value) -> ToolOutcome {
-    let cache = state.mcp.lock().await;
-    let def = match cache.tools.iter().find(|t| t.name == name) {
-        Some(d) => d,
-        None => {
-            return ToolOutcome { text: format!("unknown tool \"{name}\""), is_error: true, ui: vec![] }
+    // Resolve the target service and DROP the cache lock before the (potentially
+    // slow) remote call, so concurrent tool calls / status / reset / widget-handler
+    // proxies aren't serialized behind one in-flight tool. Clone the Arc to keep the
+    // service alive independent of the guard.
+    let service = {
+        let cache = state.mcp.lock().await;
+        let server_idx = match cache.tools.iter().find(|t| t.name == name) {
+            Some(d) => d.server,
+            None => {
+                return ToolOutcome {
+                    text: format!("unknown tool \"{name}\""),
+                    is_error: true,
+                    ui: vec![],
+                }
+            }
+        };
+        match cache.services.get(server_idx) {
+            Some(s) => Arc::clone(s),
+            None => {
+                return ToolOutcome {
+                    text: format!("tool \"{name}\" has no connected server"),
+                    is_error: true,
+                    ui: vec![],
+                }
+            }
         }
     };
-    let service = &cache.services[def.server];
     // CallToolRequestParams is #[non_exhaustive]; build it via serde to stay version-robust.
     let args_val = if args.is_object() { args } else { json!({}) };
     let params: CallToolRequestParams =

@@ -29,12 +29,24 @@ pub fn run() {
             eprintln!("[arete-chat] backend on {api_base}");
 
             std::thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
+                let rt = match tokio::runtime::Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        eprintln!("[arete-chat] failed to start tokio runtime: {e}");
+                        std::process::exit(1);
+                    }
+                };
                 rt.block_on(async move {
                     if let Err(e) = server::serve(listener, state).await {
                         eprintln!("[arete-chat] server error: {e}");
                     }
                 });
+                // The backend is meant to run for the app's whole lifetime. If serve()
+                // ever returns, the /api the window depends on is dead — exit so the
+                // failure is visible (process closes) instead of a live window with a
+                // silently-dead backend.
+                eprintln!("[arete-chat] backend exited unexpectedly; shutting down");
+                std::process::exit(1);
             });
 
             // Create the window, injecting the API origin before any page script runs.

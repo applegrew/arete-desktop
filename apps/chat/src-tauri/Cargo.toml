@@ -17,7 +17,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 axum = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time"] }
 tokio-stream = "0.1"
 bytes = "1"
 tower-http = { version = "0.6", features = ["cors", "limit", "fs"] }
