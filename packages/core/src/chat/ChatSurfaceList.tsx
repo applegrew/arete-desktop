@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useState, useRef, useMemo, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useChatEntries, type ChatStore } from './ChatStore';
+import { Markdown } from './Markdown';
 
 export interface ChatSurfaceListProps {
   store: ChatStore;
@@ -160,14 +161,13 @@ export function ChatSurfaceList({ store, renderSurface, onApproveScript, onRejec
                 maxWidth: '88%',
                 padding: '2px 0 2px 12px',
                 borderLeft: '2px solid rgba(124,131,255,0.45)',
-                whiteSpace: 'pre-wrap',
                 animation: 'glass-rise 0.3s ease both',
               }}
             >
               <div style={{ fontSize: 9.5, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 3, fontFamily: 'var(--font-display)' }}>
                 thinking
               </div>
-              {entry.text}
+              <Markdown text={entry.text ?? ''} dim />
             </li>
           );
         }
@@ -286,7 +286,7 @@ export function ChatSurfaceList({ store, renderSurface, onApproveScript, onRejec
               animation: 'glass-rise 0.32s cubic-bezier(0.22,1,0.36,1) both',
             }}
           >
-            {entry.text && <div>{entry.text}</div>}
+            {entry.text && (isUser ? <div style={{ whiteSpace: 'pre-wrap' }}>{entry.text}</div> : <Markdown text={entry.text} />)}
             {entry.surfaceId !== undefined && renderSurface
               ? renderSurface(entry.surfaceId, entry.id)
               : null}
