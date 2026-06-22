@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useControlledValue } from '../useControlledValue';
 import { z } from 'zod';
 import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
@@ -29,7 +29,7 @@ export const ChipsApi: ComponentApi<typeof chipsSchema> = {
 
 export const Chips = createComponentImplementation(ChipsApi, ({ props, context }) => {
   const dispatchAction = useAction({ sourceComponentId: context.componentModel.id });
-  const [value, setValue] = useState<string[]>(props.value ?? []);
+  const [value, setValue] = useControlledValue<string[]>(props.value, []);
 
   const labelStyle: React.CSSProperties = { fontSize: 13, fontWeight: 600, marginBottom: 4, display: 'block' };
   const wrapStyle: React.CSSProperties = {

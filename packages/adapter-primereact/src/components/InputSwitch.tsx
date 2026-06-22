@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useControlledValue } from '../useControlledValue';
 import { z } from 'zod';
 import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
@@ -26,7 +26,7 @@ export const InputSwitchApi: ComponentApi<typeof inputSwitchSchema> = {
 
 export const InputSwitch = createComponentImplementation(InputSwitchApi, ({ props, context }) => {
   const dispatchAction = useAction({ sourceComponentId: context.componentModel.id });
-  const [value, setValue] = useState<boolean>(props.value ?? false);
+  const [value, setValue] = useControlledValue<boolean>(props.value, false);
 
   const wrapStyle: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 8,

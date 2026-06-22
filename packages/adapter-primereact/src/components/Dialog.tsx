@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
 import { Dialog as PrimeDialog } from 'primereact/dialog';
+import { useControlledValue } from '../useControlledValue';
 
 const dialogSchema = z.object({
   header: z.string().optional(),
@@ -28,6 +29,11 @@ export const DialogApi: ComponentApi<typeof dialogSchema> = {
 };
 
 export const Dialog = createComponentImplementation(DialogApi, ({ props, buildChild }) => {
+  // Local visibility synced from props, so the X / Escape / mask click actually
+  // close the (controlled) dialog instead of being inert. Re-syncs if the agent
+  // pushes a new `visible`.
+  const [visible, setVisible] = useControlledValue<boolean>(props.visible, true);
+
   const wrapperStyle: React.CSSProperties = {
     ...(typeof props.weight === 'number' ? { flex: props.weight, minWidth: 0, minHeight: 0 } : {}),
   };
@@ -45,7 +51,7 @@ export const Dialog = createComponentImplementation(DialogApi, ({ props, buildCh
     <div style={wrapperStyle}>
       <PrimeDialog
         header={props.header}
-        visible={props.visible ?? true}
+        visible={visible}
         closable={props.closable ?? true}
         closeOnEscape={props.closeOnEscape ?? true}
         modal={props.modal ?? true}
@@ -54,7 +60,7 @@ export const Dialog = createComponentImplementation(DialogApi, ({ props, buildCh
         position={props.position ?? 'center'}
         style={dialogStyle}
         footer={props.footer ? buildChild(props.footer) : undefined}
-        onHide={() => {}}
+        onHide={() => setVisible(false)}
       >
         {props.child ? buildChild(props.child) : null}
       </PrimeDialog>

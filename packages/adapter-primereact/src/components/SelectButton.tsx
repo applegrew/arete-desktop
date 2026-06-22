@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useControlledValue } from '../useControlledValue';
 import { z } from 'zod';
 import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
@@ -39,7 +39,7 @@ function normalizeOptions(options: (string | { label: string; value?: unknown })
 
 export const SelectButton = createComponentImplementation(SelectButtonApi, ({ props, context }) => {
   const dispatchAction = useAction({ sourceComponentId: context.componentModel.id });
-  const [value, setValue] = useState<unknown>(props.value ?? (props.multiple ? [] : null));
+  const [value, setValue] = useControlledValue<unknown>(props.value, props.multiple ? [] : null);
 
   const labelStyle: React.CSSProperties = { fontSize: 13, fontWeight: 600, marginBottom: 4, display: 'block' };
   const wrapStyle: React.CSSProperties = {

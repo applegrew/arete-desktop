@@ -21,9 +21,16 @@ export const ToastApi: ComponentApi<typeof toastSchema> = {
 
 export const Toast = createComponentImplementation(ToastApi, ({ props }) => {
   const toast = useRef<PrimeToast>(null);
+  // Key of the last toast actually shown, so identical content isn't popped again
+  // (StrictMode double-invoke, a remount, or an unrelated re-render re-running the
+  // effect). A genuinely new message — any field differs — still shows.
+  const lastShown = useRef<string | null>(null);
 
   useEffect(() => {
     if (!toast.current) return;
+    const key = JSON.stringify([props.severity, props.summary, props.detail, props.life, props.sticky]);
+    if (key === lastShown.current) return;
+    lastShown.current = key;
     toast.current.show({
       severity: props.severity ?? 'info',
       summary: props.summary,

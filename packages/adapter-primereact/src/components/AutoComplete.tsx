@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useControlledValue } from '../useControlledValue';
 import { z } from 'zod';
 import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
@@ -31,7 +32,7 @@ export const AutoCompleteApi: ComponentApi<typeof autoCompleteSchema> = {
 
 export const AutoComplete = createComponentImplementation(AutoCompleteApi, ({ props, context }) => {
   const dispatchAction = useAction({ sourceComponentId: context.componentModel.id });
-  const [value, setValue] = useState<unknown>(props.value ?? '');
+  const [value, setValue] = useControlledValue<unknown>(props.value, '');
   const [filteredSuggestions, setFilteredSuggestions] = useState<unknown[]>([]);
   const wrapStyle: React.CSSProperties = {
     display: 'flex', flexDirection: 'column',
@@ -66,9 +67,15 @@ export const AutoComplete = createComponentImplementation(AutoCompleteApi, ({ pr
           const v = e.value ?? '';
           setValue(v);
           if (props.action) {
+            // Selecting an object suggestion yields the whole object; the schema
+            // declares a string, so emit the display field (or coerce) instead.
+            const dispatched =
+              v && typeof v === 'object' && props.field
+                ? (v as Record<string, unknown>)[props.field]
+                : v;
             dispatchAction({
               name: props.action.event.name,
-              context: { value: v, ...(props.action.event.context ?? {}) },
+              context: { value: dispatched, ...(props.action.event.context ?? {}) },
             });
           }
         }}

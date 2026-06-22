@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useControlledValue } from '../useControlledValue';
 import { z } from 'zod';
 import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
@@ -40,7 +40,7 @@ function normalizeOptions(options: (string | { label: string; value?: unknown })
 
 export const MultiSelect = createComponentImplementation(MultiSelectApi, ({ props, context }) => {
   const dispatchAction = useAction({ sourceComponentId: context.componentModel.id });
-  const [value, setValue] = useState<unknown[]>(Array.isArray(props.value) ? props.value : []);
+  const [value, setValue] = useControlledValue<unknown[]>(Array.isArray(props.value) ? props.value : undefined, []);
 
   const labelStyle: React.CSSProperties = { fontSize: 13, fontWeight: 600, marginBottom: 4, display: 'block' };
   const wrapStyle: React.CSSProperties = {
@@ -55,6 +55,9 @@ export const MultiSelect = createComponentImplementation(MultiSelectApi, ({ prop
         value={value}
         options={normalizeOptions(props.options ?? [])}
         optionLabel="label"
+        // Bind/emit the option `value` field, not the whole {label,value} wrapper,
+        // so the dispatched array matches the agent's declared value shape.
+        optionValue="value"
         filter={props.filter}
         placeholder={props.placeholder ?? 'Select…'}
         onChange={(e) => {

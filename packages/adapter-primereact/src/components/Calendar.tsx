@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useControlledValue } from '../useControlledValue';
 import { z } from 'zod';
 import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
@@ -33,7 +33,7 @@ export const CalendarApi: ComponentApi<typeof calendarSchema> = {
 
 export const Calendar = createComponentImplementation(CalendarApi, ({ props, context }) => {
   const dispatchAction = useAction({ sourceComponentId: context.componentModel.id });
-  const [value, setValue] = useState<unknown>(props.value ?? null);
+  const [value, setValue] = useControlledValue<unknown>(props.value, null);
 
   const labelStyle: React.CSSProperties = { fontSize: 13, fontWeight: 600, marginBottom: 4, display: 'block' };
   const wrapStyle: React.CSSProperties = {
@@ -56,9 +56,13 @@ export const Calendar = createComponentImplementation(CalendarApi, ({ props, con
         onChange={(e) => {
           setValue(e.value);
           if (props.action) {
+            // The agent's schema declares `value` as a string; PrimeReact hands back
+            // Date objects. Serialize to ISO so the round-trip value matches the spec.
+            const toIso = (v: unknown): unknown =>
+              v instanceof Date ? v.toISOString() : Array.isArray(v) ? v.map(toIso) : v;
             dispatchAction({
               name: props.action.event.name,
-              context: { value: e.value, ...(props.action.event.context ?? {}) },
+              context: { value: toIso(e.value), ...(props.action.event.context ?? {}) },
             });
           }
         }}
