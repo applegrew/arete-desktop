@@ -5,7 +5,7 @@ use super::display_hints::{self, DisplayHint};
 use super::fs_tools;
 use super::log::log_llm;
 use super::mcp::{self, McpUiResource, ToolOutcome};
-use super::ollama::Ollama;
+use super::llm::LlmClient;
 use super::prompt::build_system_prompt;
 use super::schema::envelope_schema;
 use super::skills::{load_skills, render_skills_for_prompt};
@@ -36,7 +36,7 @@ pub type TurnError = (u16, Value);
 pub async fn run_agent_turn(
     state: &AppState,
     body: &Value,
-    ollama: &Ollama,
+    llm: &LlmClient,
     sink: &Sink,
 ) -> Result<Outcome, TurnError> {
     let prompt = body.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
@@ -72,7 +72,7 @@ pub async fn run_agent_turn(
 
     let history_len = body.get("messages").and_then(|m| m.as_array()).map(|a| a.len()).unwrap_or(0);
     log_llm(json!({
-        "phase": "turn.start", "model": ollama.model,
+        "phase": "turn.start", "model": llm.model,
         "promptChars": prompt.len(), "historyLen": history_len, "tools": tool_infos.len(),
     }));
 
@@ -104,7 +104,7 @@ pub async fn run_agent_turn(
     let mut current_hints: HashMap<String, DisplayHint> = HashMap::new();
     if !tool_infos.is_empty() {
         pre_step(
-            state, ollama, &tool_infos, ctx, &mut convo, sink,
+            state, llm, &tool_infos, ctx, &mut convo, sink,
             &mut ui_resources, &mut current_hints,
         )
         .await;
@@ -132,7 +132,7 @@ pub async fn run_agent_turn(
         let _ = db::set_state(&mut conn, &patch);
     }
 
-    match run_with_correction(ollama, convo, ctx).await {
+    match run_with_correction(llm, convo, ctx).await {
         Ok(mut outcome) => {
             // Render captured MCP-UI resources as their own surfaces (framework-driven).
             for r in &ui_resources {
@@ -155,7 +155,7 @@ pub async fn run_agent_turn(
 /// so the UI shows them incrementally, rather than all at once after the turn completes.
 async fn pre_step(
     state: &AppState,
-    ollama: &Ollama,
+    llm: &LlmClient,
     tool_infos: &[Value],
     ctx: &Value,
     convo: &mut Vec<Value>,
@@ -164,7 +164,7 @@ async fn pre_step(
     hints: &mut HashMap<String, DisplayHint>,
 ) {
     for _ in 0..MAX_TOOL_ROUNDS {
-        let step = match ollama.chat_with_tools(convo, tool_infos).await {
+        let step = match llm.chat_with_tools(convo, tool_infos).await {
             Ok(s) => s,
             Err(e) => {
                 log_llm(json!({ "phase": "prestep.error", "error": e }));
@@ -190,7 +190,10 @@ async fn pre_step(
             log_llm(json!({ "phase": "prestep.tool", "tool": tc.name, "isError": outcome.is_error }));
             sink.tool_call_result(&tc.id, &outcome.text, outcome.is_error).await;
             sink.tool_call_end(&tc.id).await;
-            convo.push(json!({ "role": "tool", "content": outcome.text.clone(), "tool_name": tc.name.clone()}));
+            // `tool_call_id` is required by OpenAI/DeepSeek (must echo the assistant's
+            // tool-call id); `tool_name` is what Ollama keys on. Sending both keeps
+            // the same convo valid for either provider.
+            convo.push(json!({ "role": "tool", "tool_call_id": tc.id.clone(), "tool_name": tc.name.clone(), "content": outcome.text.clone() }));
             ui_resources.extend(outcome.ui);
 
             // Classify the tool result and collect display hints so the agent
@@ -255,14 +258,14 @@ fn get_surface_history(ctx: &Value, args: &Value) -> ToolOutcome {
 }
 
 async fn run_with_correction(
-    ollama: &Ollama,
+    llm: &LlmClient,
     mut convo: Vec<Value>,
     ctx: &Value,
 ) -> Result<Outcome, TurnError> {
     let mut corrections = 0usize;
     loop {
         log_llm(json!({ "phase": "envelope.request", "attempt": corrections }));
-        let envelope = match ollama.generate_object(&convo, envelope_schema()).await {
+        let envelope = match llm.generate_object(&convo, envelope_schema()).await {
             Ok(v) if v.is_object() => {
                 log_llm(json!({ "phase": "envelope.response", "attempt": corrections, "envelope": v }));
                 v

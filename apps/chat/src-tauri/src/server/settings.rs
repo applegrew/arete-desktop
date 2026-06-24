@@ -16,6 +16,9 @@ pub fn default_settings() -> Value {
         "mcpServers": [],
         "gateDiffs": true,
         "allowedFolders": [],
+        "provider": "ollama",
+        "deepseekApiKey": "",
+        "deepseekModel": "deepseek-v4-flash",
     })
 }
 
@@ -59,6 +62,9 @@ pub fn resolve_settings(conn: &Connection) -> Result<Value> {
             _ => base_obj.get("allowedFolders").cloned().unwrap_or_else(|| json!([])),
         },
     );
+    out.insert("provider".into(), guard_string(&stored, "provider", &base_obj));
+    out.insert("deepseekApiKey".into(), guard_string(&stored, "deepseekApiKey", &base_obj));
+    out.insert("deepseekModel".into(), guard_string(&stored, "deepseekModel", &base_obj));
     Ok(Value::Object(out))
 }
 

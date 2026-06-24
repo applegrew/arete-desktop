@@ -161,9 +161,17 @@ export interface McpServerSetting {
   entry: McpServerEntry;
 }
 
+export type LlmProvider = 'ollama' | 'deepseek';
+
 export interface AgentSettings {
+  /** Which LLM backend to use. Defaults to 'ollama'. */
+  provider?: LlmProvider;
   model: string;
   ollamaUrl: string;
+  /** DeepSeek API key (used when provider === 'deepseek'). */
+  deepseekApiKey?: string;
+  /** DeepSeek model id, e.g. 'deepseek-v4-flash'. */
+  deepseekModel?: string;
   mcpServers: McpServerSetting[];
   gateDiffs: boolean;
   /** Absolute folder paths the agent's filesystem tools may operate within. */

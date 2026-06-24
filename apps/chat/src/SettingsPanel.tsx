@@ -217,26 +217,62 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
       <div style={{ overflowY: 'auto', maxHeight: '60vh', minHeight: 0, paddingRight: 4 }}>
         {/* Model & agent */}
         <div style={sectionTitle}>Model &amp; agent</div>
-        <label style={label}>Model</label>
-        <input
+        <label style={label}>Provider</label>
+        <select
           style={input}
-          list="arete-models"
-          value={draft.model}
-          onChange={(e) => set({ model: e.target.value })}
-          placeholder="e.g. gemma4:31b-cloud"
-        />
-        <datalist id="arete-models">
-          {availableModels.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
-        <label style={{ ...label, marginTop: 12 }}>Ollama URL</label>
-        <input
-          style={input}
-          value={draft.ollamaUrl}
-          onChange={(e) => set({ ollamaUrl: e.target.value })}
-          placeholder="http://localhost:11434"
-        />
+          value={draft.provider ?? 'ollama'}
+          onChange={(e) => set({ provider: e.target.value as AgentSettings['provider'] })}
+        >
+          <option value="ollama">Ollama (local)</option>
+          <option value="deepseek">DeepSeek API</option>
+        </select>
+
+        {(draft.provider ?? 'ollama') === 'deepseek' ? (
+          <>
+            <label style={{ ...label, marginTop: 12 }}>DeepSeek model</label>
+            <input
+              style={input}
+              value={draft.deepseekModel ?? ''}
+              onChange={(e) => set({ deepseekModel: e.target.value })}
+              placeholder="deepseek-v4-flash"
+            />
+            <label style={{ ...label, marginTop: 12 }}>DeepSeek API key</label>
+            <input
+              style={input}
+              type="password"
+              value={draft.deepseekApiKey ?? ''}
+              onChange={(e) => set({ deepseekApiKey: e.target.value })}
+              placeholder="sk-…"
+              autoComplete="off"
+            />
+            <div style={{ fontSize: 11, color: 'var(--text-faint, #6b7280)', marginTop: 6 }}>
+              Calls https://api.deepseek.com. The key is stored locally in app settings.
+            </div>
+          </>
+        ) : (
+          <>
+            <label style={{ ...label, marginTop: 12 }}>Model</label>
+            <input
+              style={input}
+              list="arete-models"
+              value={draft.model}
+              onChange={(e) => set({ model: e.target.value })}
+              placeholder="e.g. gemma4:31b-cloud"
+            />
+            <datalist id="arete-models">
+              {availableModels.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+            <label style={{ ...label, marginTop: 12 }}>Ollama URL</label>
+            <input
+              style={input}
+              value={draft.ollamaUrl}
+              onChange={(e) => set({ ollamaUrl: e.target.value })}
+              placeholder="http://localhost:11434"
+            />
+          </>
+        )}
 
         {/* MCP servers */}
         <div style={{ ...sectionTitle, display: 'flex', alignItems: 'center' }}>

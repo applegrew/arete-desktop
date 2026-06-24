@@ -1,8 +1,8 @@
 pub mod display_hints;
 pub mod fs_tools;
+pub mod llm;
 pub mod log;
 pub mod mcp;
-pub mod ollama;
 pub mod prompt;
 pub mod schema;
 pub mod skills;
@@ -26,7 +26,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::{settings, state::AppState};
-use ollama::Ollama;
+use llm::LlmClient;
 use sse::Sink;
 use turn::run_agent_turn;
 
@@ -52,19 +52,27 @@ impl<S: Stream + Unpin> Stream for GuardedStream<S> {
     }
 }
 
-/// Build an Ollama client from the live persisted settings (model + base URL).
-fn resolve_ollama(st: &AppState) -> Ollama {
+/// Build an LLM client from the live persisted settings. `provider` selects the
+/// backend; each provider reads its own model (+ url / api key) fields.
+fn resolve_llm(st: &AppState) -> LlmClient {
     let conn = st.db_lock();
     let s = settings::resolve_settings(&conn).unwrap_or_else(|_| json!({}));
-    let model = s.get("model").and_then(|m| m.as_str()).unwrap_or("gemma4:31b-cloud");
-    let url = s.get("ollamaUrl").and_then(|u| u.as_str()).unwrap_or("http://localhost:11434");
-    Ollama::new(url, model)
+    let provider = s.get("provider").and_then(|p| p.as_str()).unwrap_or("ollama");
+    if provider == "deepseek" {
+        let key = s.get("deepseekApiKey").and_then(|k| k.as_str()).unwrap_or("");
+        let model = s.get("deepseekModel").and_then(|m| m.as_str()).unwrap_or("deepseek-v4-flash");
+        LlmClient::deepseek(key, model)
+    } else {
+        let model = s.get("model").and_then(|m| m.as_str()).unwrap_or("gemma4:31b-cloud");
+        let url = s.get("ollamaUrl").and_then(|u| u.as_str()).unwrap_or("http://localhost:11434");
+        LlmClient::ollama(url, model)
+    }
 }
 
-/// GET /api/agui/health — Ollama liveness + available models.
+/// GET /api/agui/health — LLM provider liveness + available models.
 pub async fn health(State(st): State<AppState>) -> Json<Value> {
-    let ollama = resolve_ollama(&st);
-    Json(ollama.health().await)
+    let llm = resolve_llm(&st);
+    Json(llm.health().await)
 }
 
 /// GET /api/agui/mcp-status — per-server connection status (discovers if needed).
@@ -80,7 +88,7 @@ pub async fn mcp_reconnect(State(st): State<AppState>) -> Json<Value> {
 
 /// POST /api/agui — run one agent turn and stream the result as an AG-UI SSE stream.
 pub async fn run_turn(State(st): State<AppState>, Json(body): Json<Value>) -> Response {
-    let ollama = resolve_ollama(&st);
+    let llm = resolve_llm(&st);
     let thread_id = body
         .get("threadId")
         .and_then(|t| t.as_str())
@@ -94,7 +102,7 @@ pub async fn run_turn(State(st): State<AppState>, Json(body): Json<Value>) -> Re
         let sink = Sink::new(tx);
         sink.run_started(&thread_id, &run_id).await;
 
-        match run_agent_turn(&st, &body, &ollama, &sink).await {
+        match run_agent_turn(&st, &body, &llm, &sink).await {
             Ok(outcome) => {
                 if let Some(rationale) = &outcome.rationale {
                     sink.emit_text(&format!("thinking:{run_id}"), rationale, "assistant").await;
