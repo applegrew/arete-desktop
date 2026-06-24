@@ -91,7 +91,9 @@ export class ChatStore {
   }
 
   removeBySurfaceId(surfaceId: string): void {
-    const next = this.entries.filter((e) => e.surfaceId !== surfaceId);
+    // Keep script-diff cards: they borrow the surfaceId but are pending approvals,
+    // not part of the surface's render that's being cleared.
+    const next = this.entries.filter((e) => e.surfaceId !== surfaceId || e.role === 'script-diff');
     if (next.length === this.entries.length) return;
     this.entries = next;
     this.emit();
@@ -102,7 +104,12 @@ export class ChatStore {
     // Match the real surface entry only — never a `surface-moved` placeholder, which
     // shares this surfaceId and would otherwise be picked up by findIndex.
     const isPlaceholderFor = (e: ChatEntry) => e.role === 'surface-moved' && e.surfaceId === surfaceId;
-    const idx = this.entries.findIndex((e) => e.surfaceId === surfaceId && e.role !== 'surface-moved');
+    // A script-diff entry carries the *target* surfaceId (so "locate" can find the
+    // surface) but is NOT the surface's render entry — never treat it as one, or
+    // re-rendering the surface would clobber the pending approval card.
+    const idx = this.entries.findIndex(
+      (e) => e.surfaceId === surfaceId && e.role !== 'surface-moved' && e.role !== 'script-diff',
+    );
     if (idx < 0) {
       // No live surface entry. Drop any stale placeholder for it before pushing fresh.
       const cleaned = this.entries.filter((e) => !isPlaceholderFor(e));
@@ -129,7 +136,9 @@ export class ChatStore {
     // Is the surface already the last *real* entry? If so it isn't moving anywhere
     // (hot streaming path): update in place and keep any existing placeholder that
     // already marks where it moved from — don't add a new one.
-    const isAlreadyLast = !this.entries.slice(idx + 1).some((e) => e.role !== 'surface-moved');
+    const isAlreadyLast = !this.entries
+      .slice(idx + 1)
+      .some((e) => e.role !== 'surface-moved' && e.role !== 'script-diff');
 
     if (isAlreadyLast) {
       this.entries = this.entries.map((e, i) => (i === idx ? moved : e));
