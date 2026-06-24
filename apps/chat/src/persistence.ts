@@ -166,6 +166,8 @@ export interface AgentSettings {
   ollamaUrl: string;
   mcpServers: McpServerSetting[];
   gateDiffs: boolean;
+  /** Absolute folder paths the agent's filesystem tools may operate within. */
+  allowedFolders?: string[];
 }
 
 export const loadSettings = (): Promise<AgentSettings | null> =>

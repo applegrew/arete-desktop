@@ -1,4 +1,5 @@
 pub mod display_hints;
+pub mod fs_tools;
 pub mod log;
 pub mod mcp;
 pub mod ollama;

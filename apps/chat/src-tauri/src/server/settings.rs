@@ -15,6 +15,7 @@ pub fn default_settings() -> Value {
         "ollamaUrl": ollama_url,
         "mcpServers": [],
         "gateDiffs": true,
+        "allowedFolders": [],
     })
 }
 
@@ -49,6 +50,13 @@ pub fn resolve_settings(conn: &Connection) -> Result<Value> {
         match stored.get("gateDiffs") {
             Some(v @ Value::Bool(_)) => v.clone(),
             _ => base_obj.get("gateDiffs").cloned().unwrap_or(Value::Bool(true)),
+        },
+    );
+    out.insert(
+        "allowedFolders".into(),
+        match stored.get("allowedFolders") {
+            Some(v @ Value::Array(_)) => v.clone(),
+            _ => base_obj.get("allowedFolders").cloned().unwrap_or_else(|| json!([])),
         },
     );
     Ok(Value::Object(out))

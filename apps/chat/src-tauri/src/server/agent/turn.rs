@@ -2,6 +2,7 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 
 use super::display_hints::{self, DisplayHint};
+use super::fs_tools;
 use super::log::log_llm;
 use super::mcp::{self, McpUiResource, ToolOutcome};
 use super::ollama::Ollama;
@@ -52,6 +53,10 @@ pub async fn run_agent_turn(
     // a timeline — so a fresh chat with no MCP tools pays no pre-step cost, but once
     // surfaces accumulate states the LLM can study them.
     tool_infos.extend(builtin_tools(ctx));
+    // Folder-gated filesystem tools — advertised only when the user has authorized
+    // at least one folder (see Settings → File system access).
+    let allowed_folders = fs_tools::allowed_folders(state);
+    tool_infos.extend(fs_tools::schemas(&allowed_folders));
 
     let skills = render_skills_for_prompt(&load_skills(&state.skills_dir()));
     // Load display hints accumulated from prior turns so the agent gets field-level
@@ -73,6 +78,16 @@ pub async fn run_agent_turn(
 
     // Thread prior conversation (history) + current prompt; system passed separately.
     let mut convo: Vec<Value> = vec![json!({ "role": "system", "content": system })];
+    if !allowed_folders.is_empty() {
+        convo.push(json!({
+            "role": "system",
+            "content": format!(
+                "Filesystem tools (read_file, create_file, update_file, delete_file, mkdir, rmdir) are available. \
+                 They may ONLY operate on absolute paths inside these authorized folders or their subdirectories:\n{}",
+                allowed_folders.iter().map(|f| format!("- {f}")).collect::<Vec<_>>().join("\n")
+            )
+        }));
+    }
     if let Some(msgs) = body.get("messages").and_then(|m| m.as_array()) {
         for m in msgs {
             let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
@@ -167,6 +182,8 @@ async fn pre_step(
             // Built-in tools resolve locally against the turn's context (no MCP).
             let outcome = if tc.name == "getSurfaceHistory" {
                 get_surface_history(ctx, &tc.arguments)
+            } else if let Some(o) = fs_tools::dispatch(state, &tc.name, &tc.arguments).await {
+                o
             } else {
                 mcp::call(state, &tc.name, tc.arguments.clone()).await
             };

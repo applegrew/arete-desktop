@@ -442,8 +442,69 @@ export function SettingsPanel({ open, onClose, settings, availableModels, onSave
           </button>
         </div>
 
+        {/* File system access */}
+        <div style={sectionTitle}>File system access</div>
+        <div style={{ fontSize: 12, color: 'var(--text-dim, #9aa4b8)', marginBottom: 8 }}>
+          The agent&apos;s file tools (read, create, update, delete, mkdir, rmdir) may only operate
+          inside these folders and their subdirectories. With none selected, the tools are disabled.
+        </div>
+        {(draft.allowedFolders ?? []).length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--text-faint, #6b7280)', fontStyle: 'italic', marginBottom: 8 }}>
+            No folders selected.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+            {(draft.allowedFolders ?? []).map((folder) => (
+              <div key={folder} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span
+                  style={{
+                    flex: 1,
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    color: 'var(--text, #ddd)',
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {folder}
+                </span>
+                <button
+                  type="button"
+                  style={{ ...btn, color: '#ef4444' }}
+                  onClick={() =>
+                    set({ allowedFolders: (draft.allowedFolders ?? []).filter((f) => f !== folder) })
+                  }
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          style={btn}
+          onClick={async () => {
+            try {
+              const { open } = await import('@tauri-apps/plugin-dialog');
+              const picked = await open({
+                directory: true,
+                multiple: true,
+                title: 'Authorize folder for agent file access',
+              });
+              if (!picked) return;
+              const arr = Array.isArray(picked) ? picked : [picked];
+              const merged = Array.from(new Set([...(draft.allowedFolders ?? []), ...arr]));
+              set({ allowedFolders: merged });
+            } catch (e) {
+              console.error('Folder picker failed', e);
+            }
+          }}
+        >
+          Add folder…
+        </button>
+
         {/* Appearance */}
-        <div style={sectionTitle}>Appearance &amp; diffs</div>
+        <div style={{ ...sectionTitle, marginTop: 18 }}>Appearance &amp; diffs</div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#ddd', cursor: 'pointer' }}>
           <input type="checkbox" checked={draft.gateDiffs} onChange={(e) => set({ gateDiffs: e.target.checked })} />
           Gate agent diffs (approve / reject before live state changes)

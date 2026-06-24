@@ -7,6 +7,7 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 /// The React frontend talks to it over HTTP at `/api` exactly as it did the Node server.
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app
                 .path()
