@@ -31,10 +31,7 @@ export function ChatInput({ onSubmit, disabled, busy, onCancel, placeholder }: C
         display: 'flex',
         gap: 8,
         padding: 12,
-        borderTop: '1px solid var(--hairline, #2a2a2a)',
-        background: 'rgba(255,255,255,0.025)',
-        backdropFilter: 'var(--blur)',
-        WebkitBackdropFilter: 'var(--blur)',
+        background: 'transparent',
       }}
     >
       <input
