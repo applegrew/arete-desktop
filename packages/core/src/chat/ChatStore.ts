@@ -61,6 +61,13 @@ export class ChatStore {
       actionLabel: entry.actionLabel,
       pending: entry.pending,
       createdAt: Date.now(),
+      // role === 'script-diff' carries the handler code to review; role ===
+      // 'surface-moved' carries the move target. These were previously dropped,
+      // leaving an empty (unreviewable) script-diff card.
+      oldCode: entry.oldCode,
+      newCode: entry.newCode,
+      scriptEvent: entry.scriptEvent,
+      movedToEntryId: entry.movedToEntryId,
     };
     this.entries = [...this.entries, e];
     this.emit();

@@ -67,6 +67,11 @@ export interface ApiChatEntry {
   text?: string;
   surfaceId?: string;
   createdAt: number;
+  // Under-review state for role === 'script-diff' — persisted so a pending
+  // handler approval survives a restart (the diff card is regenerated from this).
+  scriptEvent?: string;
+  oldCode?: string;
+  newCode?: string;
 }
 
 // Content is scoped per workspace via a `?ws=<id>` query param.

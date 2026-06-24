@@ -77,4 +77,11 @@ pub struct ApiChatEntry {
     pub surface_id: Option<String>,
     #[serde(default)]
     pub created_at: i64,
+    // Under-review state for role == "script-diff" (handler awaiting approval).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_event: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_code: Option<String>,
 }

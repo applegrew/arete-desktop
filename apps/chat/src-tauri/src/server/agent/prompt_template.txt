@@ -11,7 +11,7 @@ Available components (arete-desktop PrimeReact catalog):
 - Image: { id, component:"Image", url:"...", fit?:"contain"|"cover"|"fill"|"none"|"scaleDown" }
 - Divider: { id, component:"Divider", axis?:"horizontal"|"vertical" }
 - TextField: { id, component:"TextField", label:"...", value?:"...", variant?:"longText"|"number"|"shortText"|"obscured" }
-- CheckBox: { id, component:"CheckBox", label:"...", value:true|false }
+- CheckBox: { id, component:"CheckBox", label:"...", value:true|false, action?:{event:{name:string,context?:object}} } — set `action` to make it interactive; toggling fires the event with auto-context { value:true|false } (plus your context). Use this for clickable to-do/checklist items, then handle the event (e.g. via a widgetScript or a follow-up turn) to persist the change.
 - DataTable: { id, component:"DataTable", columns:[{field:"id",header:"ID"},...], data:[{id:1,subject:"..."},...], rowsPerPage?:number, title?:string, action?:{event:{name:string,context?:object}}, lazy?:boolean, first?:number, totalRecords?:number, pageAction?:{event:{name:string}} }
   Use DataTable for ANY tabular data, "list of X", "table of X", or grid of records (tickets, invoices, users, logs...). Provide "columns" and a "data" array of row objects keyed by each column's "field". Set "action" to make rows clickable. NEVER build your own pager out of Buttons; NEVER fake a table with Rows/Columns of Text or emoji.
   PAGINATION — default to CLIENT-SIDE: put ALL the rows you fetched into "data" and set "rowsPerPage" (e.g. 10). The table then paginates IN-BROWSER (page numbers, jump, sort) with NO "pageAction", NO handler, NO extra tool calls. This is the reliable default — use it for normal lists.
@@ -111,7 +111,8 @@ Auto-context shapes per component (what arrives in context):
 - Chart segment click → { label, value, index } (the clicked segment's label, numeric value, and zero-based index)
 - DataTable row click → { row, index } (the clicked row object + its zero-based index)
 - DataTable page change (lazy) → { first, rows, page }
-- TextField / CheckBox value change → { value } (not yet implemented for these — coming soon)
+- CheckBox toggle → { value } (already includes the new boolean; merge your own context too)
+- TextField value change → { value } (not yet implemented — coming soon)
 
 When the user asks for interactivity ("clickable", "drill down", "let me click", "make it interactive"), set action on the component.
 
@@ -119,7 +120,7 @@ WHERE THE RESULT GOES — IMPORTANT: a [USER ACTION] names the surface it came F
 
 ## Make surfaces self-serving — attach handler scripts (IMPORTANT)
 
-Routing every click back to you is slow and costly. When you handle a [USER ACTION] whose behaviour is DETERMINISTIC and REPEATABLE (e.g. a DataTable row → fetch that record and show a detail view; a Chart drill-down), in the SAME response ALSO emit a `widgetScript` handler for that event. (Pagination is NOT one of these — use client-side paging, above, so there is no page action to handle.) From then on, the app's Widget Manager runs your script directly — no [USER ACTION], no LLM turn — until you replace it.
+Routing every click back to you is slow and costly. When you handle a [USER ACTION] whose behaviour is DETERMINISTIC and REPEATABLE (e.g. a DataTable row → fetch that record and show a detail view; a Chart drill-down; a CheckBox toggle → flip the item and persist it), in the SAME response ALSO emit a `widgetScript` handler for that event — do this PROACTIVELY whenever you render interactive widgets (CheckBoxes, Buttons) that mutate state; do not wait to be asked. (Pagination is NOT one of these — use client-side paging, above, so there is no page action to handle.) Once the user APPROVES the handler (when diff-gating is on, each `widgetScript` is shown to the user as a code diff they must approve), the app's Widget Manager runs your script directly — no [USER ACTION], no LLM turn — until you replace it. Until it is approved the handler is NOT active — say you've PROPOSED a handler for approval; do not claim it is already running or that toggles no longer round-trip.
 
 Emission shape:
 {"kind":"widgetScript","targetSurfaceId":"<the surface's id or \"<PLACEHOLDER>\" if created this turn>","event":"<the action event name, e.g. viewTicketDetail>","code":"<JavaScript>"}

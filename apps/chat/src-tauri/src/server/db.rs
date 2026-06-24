@@ -64,6 +64,14 @@ pub fn init(path: &Path) -> Result<Connection> {
             ))?;
         }
     }
+    // Migration: persist the under-review state of a script-diff chat entry (a
+    // widget handler awaiting approval) so it survives a restart and the diff card
+    // can be regenerated.
+    for col in ["script_event", "old_code", "new_code"] {
+        if !table_has_column(&conn, "chat_entries", col)? {
+            conn.execute_batch(&format!("ALTER TABLE chat_entries ADD COLUMN {col} TEXT"))?;
+        }
+    }
 
     // First-boot seed so partial settings saves still yield a complete object.
     if get_settings(&conn)?.is_none() {
@@ -220,7 +228,7 @@ pub fn replace_surfaces(conn: &mut Connection, ws: &str, surfaces: &[ApiSurface]
 
 pub fn get_chat(conn: &Connection, ws: &str) -> Result<Vec<ApiChatEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT id, role, text, surface_id, created_at FROM chat_entries WHERE workspace_id = ?1 ORDER BY created_at ASC",
+        "SELECT id, role, text, surface_id, created_at, script_event, old_code, new_code FROM chat_entries WHERE workspace_id = ?1 ORDER BY created_at ASC",
     )?;
     let rows = stmt.query_map([ws], |r| {
         Ok(ApiChatEntry {
@@ -229,6 +237,9 @@ pub fn get_chat(conn: &Connection, ws: &str) -> Result<Vec<ApiChatEntry>> {
             text: r.get(2)?,
             surface_id: r.get(3)?,
             created_at: r.get(4)?,
+            script_event: r.get(5)?,
+            old_code: r.get(6)?,
+            new_code: r.get(7)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -239,11 +250,14 @@ pub fn save_chat(conn: &mut Connection, ws: &str, entries: &[ApiChatEntry]) -> R
     tx.execute("DELETE FROM chat_entries WHERE workspace_id = ?1", [ws])?;
     {
         let mut stmt = tx.prepare(
-            "INSERT OR REPLACE INTO chat_entries (id, role, text, surface_id, created_at, workspace_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT OR REPLACE INTO chat_entries (id, role, text, surface_id, created_at, workspace_id, script_event, old_code, new_code)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?;
         for e in entries {
-            stmt.execute(params![e.id, e.role, e.text, e.surface_id, e.created_at, ws])?;
+            stmt.execute(params![
+                e.id, e.role, e.text, e.surface_id, e.created_at, ws,
+                e.script_event, e.old_code, e.new_code
+            ])?;
         }
     }
     tx.commit()?;

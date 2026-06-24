@@ -127,7 +127,8 @@ export const componentAgentHints: Record<string, string> = {
     'a SYSTEM-TRUSTED button — the ONLY way to create a page (you cannot create pages yourself). The user must click it; it does NOT dispatch an action back to you. Its visible label is FIXED ("Create page") and cannot be changed. Place it inside a short surface that guides the user to make a page (e.g. a dashboard). Props are data only: `pageTitle`, `pageIcon`, `pageId` (use the well-known id for dedupe, e.g. "dashboard"), and optional `pinSurfaceId` to pin an existing result surface into the new page.',
   TextField:
     'the field value binds through the surface data model (e.g. {path:"/field"}); read the current value from the data model, not from the component spec.',
-  CheckBox: 'value is a boolean; like TextField it reflects live data-model state.',
+  CheckBox:
+    'value is a boolean. Set `action` to make it interactive — toggling fires the event with auto-context { value } (plus your context). Use for clickable to-do/checklist items, then handle the event to persist the change.',
   DataTable:
     'the canonical primitive for ANY tabular data or list of records (tickets, invoices, users…). Provide `columns` ([{field, header}]) and `data` (array of row objects keyed by each column `field`). Set `rowsPerPage` for built-in pagination — do NOT build your own pager with buttons. Columns sort by default. Set `action` to make rows clickable (auto-context {row, index}). For large datasets use lazy paging: `lazy:true` + `totalRecords` + `rowsPerPage` + `first` + `pageAction`, with only the current page in `data`; on the pageAction, update the same surface with the next page. Prefer this over Rows/Columns of Text or emoji for any grid/list of data.',
   Embed:

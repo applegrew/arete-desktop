@@ -1,38 +1,57 @@
 import { useId } from 'react';
+import { z } from 'zod';
+import type { ComponentApi } from '@a2ui/web_core/v0_9';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
-import { CheckBoxApi } from '@a2ui/web_core/v0_9/basic_catalog';
 import { Checkbox } from 'primereact/checkbox';
+import { useAction } from '@arete-desktop/core';
+import { useControlledValue } from '../useControlledValue';
 
-export const CheckBox = createComponentImplementation(CheckBoxApi, ({ props }) => {
+const actionSchema = z.object({
+  event: z.object({
+    name: z.string(),
+    context: z.record(z.unknown()).optional(),
+  }),
+});
+
+// Custom schema (the basic_catalog CheckBoxApi has no `action`). A checkbox toggle
+// dispatches `action` with auto-context `{ value }` — the same contract as InputSwitch —
+// so the agent can react to marking/unmarking (e.g. persist the change).
+const checkBoxSchema = z.object({
+  value: z.boolean().optional(),
+  label: z.string().optional(),
+  action: actionSchema.optional(),
+});
+
+export const CheckBoxApi: ComponentApi<typeof checkBoxSchema> = {
+  name: 'CheckBox',
+  schema: checkBoxSchema,
+};
+
+export const CheckBox = createComponentImplementation(CheckBoxApi, ({ props, context }) => {
+  const dispatchAction = useAction({ sourceComponentId: context.componentModel.id });
+  const [value, setValue] = useControlledValue<boolean>(props.value, false);
   const uniqueId = useId();
-  const hasError =
-    Array.isArray((props as Record<string, unknown>).validationErrors) &&
-    ((props as Record<string, unknown>).validationErrors as unknown[]).length > 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Checkbox
-          inputId={uniqueId}
-          checked={!!props.value}
-          onChange={(e) =>
-            typeof props.setValue === 'function' && props.setValue(e.checked ?? false)
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <Checkbox
+        inputId={uniqueId}
+        checked={value}
+        onChange={(e) => {
+          const next = e.checked ?? false;
+          setValue(next);
+          if (props.action) {
+            dispatchAction({
+              name: props.action.event.name,
+              context: { value: next, ...(props.action.event.context ?? {}) },
+            });
           }
-          className={hasError ? 'p-invalid' : ''}
-        />
-        {props.label && (
-          <label htmlFor={uniqueId} style={{ fontSize: 13, cursor: 'pointer' }}>
-            {typeof props.label === 'string' ? props.label : ''}
-          </label>
-        )}
-      </div>
-      {hasError && (
-        <small style={{ color: '#ef4444' }}>
-          {String(
-            ((props as Record<string, unknown>)
-              .validationErrors as string[])?.[0] ?? '',
-          )}
-        </small>
+        }}
+      />
+      {props.label && (
+        <label htmlFor={uniqueId} style={{ fontSize: 13, cursor: 'pointer' }}>
+          {props.label}
+        </label>
       )}
     </div>
   );

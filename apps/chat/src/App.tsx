@@ -622,7 +622,19 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
           surfaceId: e.surfaceId,
           id: e.id,
           actionLabel,
+          scriptEvent: e.scriptEvent,
+          oldCode: e.oldCode,
+          newCode: e.newCode,
         });
+        // Rebuild the in-memory pending map so a restored (still-unresolved)
+        // script-diff card can be approved/rejected after a restart.
+        if (e.role === 'script-diff' && e.scriptEvent && typeof e.newCode === 'string') {
+          pendingScriptsRef.current.set(e.id, {
+            targetSurfaceId: e.surfaceId ?? '',
+            event: e.scriptEvent,
+            code: e.newCode,
+          });
+        }
       }
 
       // 4. Per-workspace UI state (active tab + chat dock) is seeded into shellState
@@ -646,6 +658,10 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
         text: e.text ?? '',
         surfaceId: e.surfaceId,
         createdAt: e.createdAt,
+        // Persist the under-review state for pending script-diff cards.
+        scriptEvent: e.scriptEvent,
+        oldCode: e.oldCode,
+        newCode: e.newCode,
       }));
       saveChat(workspaceId, entries).catch(() => {});
     }, 1500);
