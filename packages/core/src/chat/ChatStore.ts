@@ -49,7 +49,7 @@ export class ChatStore {
     };
   };
 
-  push(entry: Omit<ChatEntry, 'id' | 'createdAt'> & Partial<Pick<ChatEntry, 'id'>>): ChatEntry {
+  push(entry: Omit<ChatEntry, 'id' | 'createdAt'> & Partial<Pick<ChatEntry, 'id' | 'createdAt'>>): ChatEntry {
     const e: ChatEntry = {
       id: entry.id ?? uid('chat'),
       role: entry.role,
@@ -60,7 +60,8 @@ export class ChatStore {
       toolError: entry.toolError,
       actionLabel: entry.actionLabel,
       pending: entry.pending,
-      createdAt: Date.now(),
+      // Preserve the original timestamp on hydration; only stamp brand-new entries.
+      createdAt: entry.createdAt ?? Date.now(),
       // role === 'script-diff' carries the handler code to review; role ===
       // 'surface-moved' carries the move target. These were previously dropped,
       // leaving an empty (unreviewable) script-diff card.

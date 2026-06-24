@@ -459,6 +459,10 @@ function ScriptDiffEntry({
         boxShadow: '0 4px 18px -6px rgba(124,131,255,0.18), inset 0 1px 0 rgba(255,255,255,0.06)',
         animation: 'glass-rise 0.3s ease both',
         overflow: 'hidden',
+        // `overflow: hidden` makes a flex item's `min-height: auto` resolve to 0, so in
+        // the scrolling chat column this card was shrinking to its 2px border (the
+        // "thin line"). Pin flex-shrink so it keeps its content height and the list scrolls.
+        flexShrink: 0,
       }}
     >
       {/* Header bar */}
