@@ -18,8 +18,8 @@ use crate::server::state::AppState;
 /// Cap returned file contents so a huge file can't blow the context window.
 const READ_CAP_BYTES: usize = 256 * 1024;
 
-const TOOL_NAMES: [&str; 6] =
-    ["read_file", "create_file", "update_file", "delete_file", "mkdir", "rmdir"];
+const TOOL_NAMES: [&str; 7] =
+    ["read_file", "list_dir", "create_file", "update_file", "delete_file", "mkdir", "rmdir"];
 
 fn is_fs_tool(name: &str) -> bool {
     TOOL_NAMES.contains(&name)
@@ -47,6 +47,11 @@ pub fn schemas(allowed: &[String]) -> Vec<Value> {
         json!({
             "name": "read_file",
             "description": "Read and return the UTF-8 contents of a file. Large files are truncated.",
+            "parameters": { "type": "object", "properties": { "path": path_prop }, "required": ["path"] }
+        }),
+        json!({
+            "name": "list_dir",
+            "description": "List the contents of a directory (like `ls`). Returns each entry's name, type (dir/file) and size.",
             "parameters": { "type": "object", "properties": { "path": path_prop }, "required": ["path"] }
         }),
         json!({
@@ -101,6 +106,7 @@ pub async fn dispatch(state: &AppState, name: &str, args: &Value) -> Option<Tool
     let roots = allowed_folders(state);
     let outcome = match name {
         "read_file" => read_file(args, &roots).await,
+        "list_dir" => list_dir(args, &roots).await,
         "create_file" => create_file(args, &roots).await,
         "update_file" => update_file(args, &roots).await,
         "delete_file" => delete_file(args, &roots).await,
@@ -133,6 +139,44 @@ async fn read_file(args: &Value, roots: &[String]) -> ToolOutcome {
         }
         Err(e) => err(format!("read_file failed for {}: {e}", path.display())),
     }
+}
+
+async fn list_dir(args: &Value, roots: &[String]) -> ToolOutcome {
+    let path = match gated_path(args, roots) {
+        Ok(p) => p,
+        Err(e) => return err(e),
+    };
+    let mut rd = match tokio::fs::read_dir(&path).await {
+        Ok(rd) => rd,
+        Err(e) => return err(format!("list_dir failed for {}: {e}", path.display())),
+    };
+    // (is_dir, formatted line) so we can sort dirs-first like `ls`.
+    let mut entries: Vec<(bool, String)> = Vec::new();
+    loop {
+        match rd.next_entry().await {
+            Ok(Some(entry)) => {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let meta = entry.metadata().await.ok();
+                let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+                let line = if is_dir {
+                    format!("{name}/")
+                } else {
+                    let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                    format!("{name} ({size} bytes)")
+                };
+                entries.push((is_dir, line));
+            }
+            Ok(None) => break,
+            Err(e) => return err(format!("list_dir failed reading {}: {e}", path.display())),
+        }
+    }
+    if entries.is_empty() {
+        return ok(format!("{} is empty.", path.display()));
+    }
+    // Directories first, then case-insensitive name order.
+    entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase())));
+    let body: Vec<String> = entries.into_iter().map(|(_, l)| l).collect();
+    ok(format!("{} ({} entries):\n{}", path.display(), body.len(), body.join("\n")))
 }
 
 async fn create_file(args: &Value, roots: &[String]) -> ToolOutcome {
