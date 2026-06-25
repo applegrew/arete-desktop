@@ -44,6 +44,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/workspaces/:id/activate", post(routes::workspaces::activate))
         .route("/api/health", get(health))
+        .route("/api/__dbg", post(dbg))
         // Agent loop: Ollama-backed turn streamed as AG-UI SSE, MCP tools, skills.
         .route("/api/agui", post(agent::run_turn))
         .route("/api/mcp-call", post(agent::mcp_call))
@@ -65,6 +66,12 @@ pub async fn serve(listener: std::net::TcpListener, state: AppState) -> Result<(
 }
 
 async fn health() -> axum::Json<Value> {
+    axum::Json(json!({ "ok": true }))
+}
+
+// TEMP DIAGNOSTIC
+async fn dbg(body: String) -> axum::Json<Value> {
+    eprintln!("[DBG] {body}");
     axum::Json(json!({ "ok": true }))
 }
 

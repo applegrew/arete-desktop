@@ -102,6 +102,7 @@ impl LlmClient {
                 "messages": messages,
                 "stream": false,
                 "format": schema,
+                "options": { "num_predict": 16384 },
             }),
             Provider::Deepseek => json!({
                 "model": self.model,

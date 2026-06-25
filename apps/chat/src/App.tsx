@@ -588,6 +588,16 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
           liveProcessor.processMessages(msgs as never);
           surfaceContentsRef.current[s.surfaceId] = s.components;
           widgetManager.loadSurface(s.surfaceId, s.handlers);
+          // TEMP DIAGNOSTIC: what handlers does this surface load with?
+          fetch(`${(window as { __ARETE_API_BASE__?: string }).__ARETE_API_BASE__ ?? ''}/api/__dbg`, {
+            method: 'POST',
+            body: JSON.stringify({
+              probe: 'loadSurface',
+              ws: workspaceId,
+              surfaceId: s.surfaceId,
+              handlerEvents: s.handlers ? Object.keys(s.handlers) : null,
+            }),
+          }).catch(() => {});
           if (Array.isArray(s.history) && s.history.length) {
             surfaceTimelineRef.current[s.surfaceId] = s.history;
             const maxSeq = s.history.reduce((m, e) => Math.max(m, e.seq ?? 0), 0);
@@ -1108,6 +1118,16 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
   // Decide per action: a registered Widget Manager handler (run in the webview) or the LLM.
   dispatchActionRef.current = (item) => {
     const h = widgetManager.handlerFor(item.action.surfaceId, item.action.name);
+    // TEMP DIAGNOSTIC: why does a toggle round-trip to the agent?
+    fetch(`${(window as { __ARETE_API_BASE__?: string }).__ARETE_API_BASE__ ?? ''}/api/__dbg`, {
+      method: 'POST',
+      body: JSON.stringify({
+        probe: 'dispatch',
+        actionSurfaceId: item.action.surfaceId,
+        actionName: item.action.name,
+        found: !!h,
+      }),
+    }).catch(() => {});
     if (h) return runWidget(item.action, h);
     return Promise.resolve(handlePromptRef.current(buildActionSynth(item.action, item.repeatCount), true));
   };

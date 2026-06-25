@@ -148,6 +148,11 @@ pub async fn mcp_call(State(st): State<AppState>, Json(body): Json<Value>) -> Js
     if name.is_empty() {
         return Json(json!({ "text": "missing tool name", "isError": true }));
     }
+    // Built-in filesystem tools (read_file, update_file, etc.) run locally and
+    // don't go through MCP. Try them first so widget handlers can persist state.
+    if let Some(outcome) = fs_tools::dispatch(&st, name, &args).await {
+        return Json(json!({ "text": outcome.text, "isError": outcome.is_error }));
+    }
     // Ensure MCP tools are discovered so the call resolves.
     mcp::ensure(&st).await;
     let outcome = mcp::call(&st, name, args).await;
