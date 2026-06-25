@@ -56,7 +56,7 @@ impl<S: Stream + Unpin> Stream for GuardedStream<S> {
 /// backend; each provider reads its own model (+ url / api key) fields.
 fn resolve_llm(st: &AppState) -> LlmClient {
     let conn = st.db_lock();
-    let s = settings::resolve_settings(&conn).unwrap_or_else(|_| json!({}));
+    let s = settings::resolve_active_settings(&conn).unwrap_or_else(|_| json!({}));
     let provider = s.get("provider").and_then(|p| p.as_str()).unwrap_or("ollama");
     if provider == "deepseek" {
         let key = s.get("deepseekApiKey").and_then(|k| k.as_str()).unwrap_or("");

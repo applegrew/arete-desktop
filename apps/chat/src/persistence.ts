@@ -183,12 +183,15 @@ export interface AgentSettings {
   allowedFolders?: string[];
 }
 
-export const loadSettings = (): Promise<AgentSettings | null> =>
-  jfetch<AgentSettings>(`${BASE()}/settings`).catch(() => null);
+export const loadSettings = (workspaceId: string): Promise<AgentSettings | null> =>
+  jfetch<AgentSettings>(`${BASE()}/settings${ws(workspaceId)}`).catch(() => null);
 
-/** Shallow-merge a patch server-side; returns the full merged settings. */
-export const saveSettings = (patch: Partial<AgentSettings>): Promise<AgentSettings | null> =>
-  jfetch<AgentSettings>(`${BASE()}/settings`, {
+/** Shallow-merge a patch server-side (for the given workspace); returns the full merged settings. */
+export const saveSettings = (
+  workspaceId: string,
+  patch: Partial<AgentSettings>,
+): Promise<AgentSettings | null> =>
+  jfetch<AgentSettings>(`${BASE()}/settings${ws(workspaceId)}`, {
     method: 'PUT',
     headers: JSON_HEADERS,
     body: JSON.stringify(patch),

@@ -28,7 +28,7 @@ fn is_fs_tool(name: &str) -> bool {
 /// The user-authorized absolute folder paths from live settings.
 pub fn allowed_folders(state: &AppState) -> Vec<String> {
     let conn = state.db_lock();
-    let s = settings::resolve_settings(&conn).unwrap_or_else(|_| json!({}));
+    let s = settings::resolve_active_settings(&conn).unwrap_or_else(|_| json!({}));
     s.get("allowedFolders")
         .and_then(|a| a.as_array())
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())

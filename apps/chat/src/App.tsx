@@ -445,10 +445,10 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
   const handleSaveSettings = useCallback((next: AgentSettings) => {
     setSettings(next);
     setDiffsGated(next.gateDiffs);
-    saveSettings(next).then((merged) => {
+    saveSettings(workspaceId, next).then((merged) => {
       if (merged) setSettings(merged);
     });
-  }, []);
+  }, [workspaceId]);
 
   const pendingByTabId = useMemo<Record<string, boolean>>(() => {
     const p: Record<string, boolean> = {};
@@ -567,7 +567,7 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
     didLoadRef.current = true;
     (async () => {
       // 0. Settings → seed gate-diffs before we gate any pinned surfaces below.
-      const loadedSettings = await loadSettings();
+      const loadedSettings = await loadSettings(workspaceId);
       const gate = loadedSettings?.gateDiffs ?? true;
       if (loadedSettings) {
         setSettings(loadedSettings);

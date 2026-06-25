@@ -32,7 +32,15 @@ pub async fn create(
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("Workspace {}", db::count_workspaces(&conn).unwrap_or(0) + 1));
     let id = format!("ws-{}", short_uuid());
-    Ok(Json(db::create_workspace(&conn, &id, &name)?))
+    let workspace = db::create_workspace(&conn, &id, &name)?;
+    // Inherit settings from the workspace active at creation time, so the new
+    // workspace starts with the same agent/provider/folder config.
+    if let Ok(Some(active)) = db::get_active_workspace_id(&conn) {
+        if let Ok(Some(src)) = db::get_settings(&conn, &active) {
+            let _ = db::save_settings(&conn, &id, &src);
+        }
+    }
+    Ok(Json(workspace))
 }
 
 /// PATCH /api/workspaces/:id `{ name?, activeTabId?, chatDockState? }`.

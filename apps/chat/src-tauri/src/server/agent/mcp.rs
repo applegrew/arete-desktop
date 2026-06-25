@@ -111,7 +111,7 @@ pub struct McpCache {
 /// Resolve enabled MCP servers from settings → [(name, entry)].
 fn resolve_servers(state: &AppState) -> Vec<(String, Value)> {
     let conn = state.db_lock();
-    let settings = super::super::settings::resolve_settings(&conn).unwrap_or_else(|_| json!({}));
+    let settings = super::super::settings::resolve_active_settings(&conn).unwrap_or_else(|_| json!({}));
     let arr = settings
         .get("mcpServers")
         .and_then(|m| m.as_array())

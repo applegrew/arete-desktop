@@ -24,10 +24,11 @@ pub fn default_settings() -> Value {
 
 /// Stored settings merged (field-by-field, type-guarded) over defaults — always
 /// returns a complete object even after partial saves.
-pub fn resolve_settings(conn: &Connection) -> Result<Value> {
+/// Resolve a specific workspace's settings (stored over defaults).
+pub fn resolve_settings(conn: &Connection, ws: &str) -> Result<Value> {
     let base = default_settings();
     let base_obj = base.as_object().cloned().unwrap_or_default();
-    let stored = match db::get_settings(conn)? {
+    let stored = match db::get_settings(conn, ws)? {
         Some(s) => s,
         None => return Ok(Value::Object(base_obj)),
     };
@@ -66,6 +67,13 @@ pub fn resolve_settings(conn: &Connection) -> Result<Value> {
     out.insert("deepseekApiKey".into(), guard_string(&stored, "deepseekApiKey", &base_obj));
     out.insert("deepseekModel".into(), guard_string(&stored, "deepseekModel", &base_obj));
     Ok(Value::Object(out))
+}
+
+/// Resolve settings for the currently-active workspace. Used by the agent runtime,
+/// which always operates on the active workspace.
+pub fn resolve_active_settings(conn: &Connection) -> Result<Value> {
+    let ws = db::get_active_workspace_id(conn)?.unwrap_or_else(|| db::DEFAULT_WS.to_string());
+    resolve_settings(conn, &ws)
 }
 
 fn guard_string(stored: &Map<String, Value>, key: &str, base: &Map<String, Value>) -> Value {

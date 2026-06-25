@@ -73,14 +73,6 @@ pub fn init(path: &Path) -> Result<Connection> {
         }
     }
 
-    // First-boot seed so partial settings saves still yield a complete object.
-    if get_settings(&conn)?.is_none() {
-        let defaults = super::settings::default_settings();
-        if let Value::Object(map) = defaults {
-            save_settings(&conn, &map)?;
-        }
-    }
-
     // Seed a default workspace (existing data already defaults into it) + an active id.
     if count_workspaces(&conn)? == 0 {
         let now = now_ms();
@@ -89,6 +81,36 @@ pub fn init(path: &Path) -> Result<Connection> {
              VALUES (?1, 'Workspace 1', 0, ?2, ?2, 'chat', 'dock')",
             params![DEFAULT_WS, now],
         )?;
+    }
+
+    // Settings are per-workspace (key 'settings:<ws>'). Migrate the legacy single
+    // global 'settings' row into every existing workspace that lacks its own (so the
+    // user's current settings are preserved across all workspaces), then drop it.
+    // Any workspace still without settings is seeded with defaults.
+    {
+        let legacy: Option<String> = conn
+            .query_row("SELECT v FROM app_state WHERE k = 'settings'", [], |r| r.get(0))
+            .optional()?;
+        let seed = legacy
+            .clone()
+            .unwrap_or_else(|| serde_json::to_string(&super::settings::default_settings()).unwrap_or_default());
+        let ws_ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM workspaces")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        for ws in ws_ids {
+            let key = settings_key(&ws);
+            let exists: Option<i64> = conn
+                .query_row("SELECT 1 FROM app_state WHERE k = ?1", [&key], |r| r.get(0))
+                .optional()?;
+            if exists.is_none() {
+                conn.execute("INSERT INTO app_state (k, v) VALUES (?1, ?2)", params![key, seed])?;
+            }
+        }
+        if legacy.is_some() {
+            conn.execute("DELETE FROM app_state WHERE k = 'settings'", [])?;
+        }
     }
     if get_active_workspace_id(&conn)?.is_none() {
         let first = list_workspaces(&conn)?.first().map(|w| w.id.clone());
@@ -292,25 +314,30 @@ pub fn set_state(conn: &mut Connection, patch: &Map<String, Value>) -> Result<()
     Ok(())
 }
 
-// ---- settings (stored in app_state under key 'settings') -----------------
+// ---- settings (stored per-workspace in app_state under key 'settings:<ws>') ----
 
-pub fn get_settings(conn: &Connection) -> Result<Option<Map<String, Value>>> {
+/// app_state key holding a given workspace's settings JSON.
+pub fn settings_key(ws: &str) -> String {
+    format!("settings:{ws}")
+}
+
+pub fn get_settings(conn: &Connection, ws: &str) -> Result<Option<Map<String, Value>>> {
     let raw: Option<String> = conn
-        .query_row("SELECT v FROM app_state WHERE k = 'settings'", [], |r| r.get(0))
+        .query_row("SELECT v FROM app_state WHERE k = ?1", [settings_key(ws)], |r| r.get(0))
         .optional()?;
     Ok(raw.and_then(|s| serde_json::from_str::<Map<String, Value>>(&s).ok()))
 }
 
-/// Shallow-merge `patch` over the raw stored settings JSON, then persist.
-pub fn save_settings(conn: &Connection, patch: &Map<String, Value>) -> Result<()> {
-    let mut next = get_settings(conn)?.unwrap_or_default();
+/// Shallow-merge `patch` over the workspace's raw stored settings JSON, then persist.
+pub fn save_settings(conn: &Connection, ws: &str, patch: &Map<String, Value>) -> Result<()> {
+    let mut next = get_settings(conn, ws)?.unwrap_or_default();
     for (k, v) in patch {
         next.insert(k.clone(), v.clone());
     }
     let s = serde_json::to_string(&Value::Object(next))?;
     conn.execute(
-        "INSERT INTO app_state (k, v) VALUES ('settings', ?1) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
-        params![s],
+        "INSERT INTO app_state (k, v) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+        params![settings_key(ws), s],
     )?;
     Ok(())
 }
@@ -395,6 +422,7 @@ pub fn delete_workspace(conn: &mut Connection, id: &str) -> Result<()> {
     tx.execute("DELETE FROM pages WHERE workspace_id = ?1", [id])?;
     tx.execute("DELETE FROM surfaces WHERE workspace_id = ?1", [id])?;
     tx.execute("DELETE FROM chat_entries WHERE workspace_id = ?1", [id])?;
+    tx.execute("DELETE FROM app_state WHERE k = ?1", [settings_key(id)])?;
     tx.execute("DELETE FROM workspaces WHERE id = ?1", [id])?;
     tx.commit()?;
     Ok(())
