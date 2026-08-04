@@ -174,6 +174,9 @@ export function ChatSurfaceList({ store, renderSurface, onApproveScript, onRejec
         if (entry.role === 'tool') {
           return <ToolResultEntry key={entry.id} entry={entry} />;
         }
+        if (entry.role === 'build-script-result') {
+          return <BuildScriptEntry key={entry.id} entry={entry} />;
+        }
         if (entry.role === 'script-diff') {
           return (
             <ScriptDiffEntry
@@ -394,6 +397,105 @@ function ToolResultEntry({
         >
           {entry.toolResult ?? '(no result)'}
         </pre>
+      )}
+    </li>
+  );
+}
+
+function BuildScriptEntry({
+  entry,
+}: {
+  entry: { id: string; buildScriptCode?: string; buildScriptFeedback?: string; buildScriptError?: boolean };
+}) {
+  const [expanded, setExpanded] = useState(!!entry.buildScriptError);
+
+  return (
+    <li
+      style={{
+        background: entry.buildScriptError ? 'rgba(248,113,113,0.07)' : 'rgba(124,131,255,0.07)',
+        backdropFilter: 'var(--blur)',
+        WebkitBackdropFilter: 'var(--blur)',
+        border: `1px solid ${entry.buildScriptError ? 'rgba(248,113,113,0.32)' : 'rgba(124,131,255,0.28)'}`,
+        borderRadius: 12,
+        padding: '8px 12px',
+        fontSize: 12,
+        alignSelf: 'flex-start',
+        maxWidth: '86%',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+        animation: 'glass-rise 0.3s ease both',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: 'var(--text-dim, #8b9cc7)',
+          cursor: 'pointer',
+          fontSize: 12,
+          padding: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+          textAlign: 'left',
+        }}
+      >
+        <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{expanded ? '▼' : '▶'}</span>
+        <span style={{ fontSize: 14, marginRight: 2 }}>{entry.buildScriptError ? '❌' : '⚡'}</span>
+        <span style={{ fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
+          {entry.buildScriptError ? 'Build script failed' : 'Executed build script'}
+        </span>
+        {entry.buildScriptFeedback && !expanded && (
+          <span style={{ color: entry.buildScriptError ? '#f87171' : '#7ee7b0', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+            · {entry.buildScriptError ? 'failed' : entry.buildScriptFeedback.split('\n')[0]}
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <>
+          {entry.buildScriptFeedback && (
+            <pre
+              style={{
+                margin: '8px 0 0 0',
+                padding: '8px 10px',
+                background: 'rgba(0,0,0,0.32)',
+                border: '1px solid var(--hairline)',
+                borderRadius: 8,
+                fontSize: 11,
+                fontFamily: 'var(--font-mono)',
+                color: entry.buildScriptError ? '#fca5a5' : '#7ee7b0',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                maxHeight: 120,
+                overflowY: 'auto',
+              }}
+            >
+              {entry.buildScriptFeedback}
+            </pre>
+          )}
+          {entry.buildScriptCode && (
+            <pre
+              style={{
+                margin: '8px 0 0 0',
+                padding: '8px 10px',
+                background: 'rgba(0,0,0,0.32)',
+                border: '1px solid var(--hairline)',
+                borderRadius: 8,
+                fontSize: 11,
+                fontFamily: 'var(--font-mono)',
+                color: 'var(--text-dim)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                maxHeight: 200,
+                overflowY: 'auto',
+              }}
+            >
+              {entry.buildScriptCode}
+            </pre>
+          )}
+        </>
       )}
     </li>
   );

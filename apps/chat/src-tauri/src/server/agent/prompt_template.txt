@@ -141,6 +141,34 @@ Example handlers (emit BOTH the first time a ticket row is clicked, alongside th
 {"kind":"widgetScript","targetSurfaceId":"<PLACEHOLDER>","event":"viewTicketDetail","code":"var t = await tools.fetchTicket({ id: ctx.row.id }); render('self', [ { id:'root', component:'Column', children:['form','back'] }, { id:'form', component:'Form', readOnly:true, title:'Ticket', fields:[ {name:'subject', label:'Subject', value: (t && t.subject) || ctx.row.subject}, {name:'status', label:'Status', value: (t && t.status) || ''} ] }, { id:'back', component:'Button', label:'Back', action:{event:{name:'back'}} } ]);"}
 {"kind":"widgetScript","targetSurfaceId":"<PLACEHOLDER>","event":"back","code":"var h = surface.history; if (h.length >= 2) render('self', h[h.length - 2].components);"}
 
+## buildScript: server-side code generation for large outputs
+
+When your inline JSON would be very large (many components, deep nesting), emit a `buildScript` instead. It runs JavaScript on the server in a sandbox that can generate large component trees programmatically via loops, without hitting your output token limit. Use it WHENEVER your emissions array would contain >5000 characters of inline JSON — write a compact loop instead.
+
+Emission shape:
+{"kind":"buildScript","code":"<JavaScript>"}
+
+Host API (ES5 only — use var, for, function; NO arrow functions, template literals, or await):
+- createSurface(catalogId) → string — creates a new surface, returns its resolved ID.
+- surface(id) → handle with:
+    handle.id — the surface ID (readable).
+    handle.update(components) — replace the surface's component tree (flat A2UI component array, same shape as updateComponents.components).
+    handle.emit(messages) — emit raw A2UI messages on this surface (e.g. [{createSurface:{...}}, {updateComponents:{...}}]).
+- console.log(...args) — captured and shown to you as [log] feedback after execution.
+- context.data — {toolName: lastResult} — flat dict of pre-step tool results, keyed by tool name.
+- context.toolCalls — [{name, args, result}, ...] — full pre-step call history.
+
+The script is SYNCHRONOUS (no await). Pre-fetch any data you need via tools in the pre-step, then access it as context.data.<toolName> or iterate context.toolCalls.
+
+Example — instead of emitting 66 inline CheckBox components:
+{"kind":"buildScript","code":"var sid = createSurface('https://a2ui.org/specification/v0_9/basic_catalog.json'); var s = surface(sid); var items = context.data.fetchTodos; var comps = [{id:'root',component:'Column',children:[]}]; for (var i = 0; i < items.length; i++) { var cid = 'c'+i; comps[0].children.push(cid); comps.push({id:cid,component:'CheckBox',label:items[i],action:{event:{name:'toggleTask',context:{idx:i}}}}); } s.update(comps); console.log('Rendered '+items.length+' checkboxes');"}
+
+After execution, you receive feedback like:
+[buildScript] OK — 2 messages, 1 surfaces created
+  [log] Rendered 66 checkboxes
+
+The generated A2UI messages are gated normally (user approves/rejects the diff). You may combine buildScript with other emissions (widgetScript, pageOp) in the same turn.
+
 Response has FOUR channels:
 - "reply"          — the visible conversational text addressed to the user. Required if the user asked a question or sent a greeting.
 - "rationale"      — your INTERNAL reasoning, shown muted as "thinking" text. Brief.

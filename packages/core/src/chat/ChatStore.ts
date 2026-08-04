@@ -6,7 +6,7 @@ import {
   type TranscriptOptions,
 } from '../agent/transcript';
 
-export type ChatRole = 'user' | 'agent' | 'system' | 'thought' | 'tool' | 'action' | 'script-diff' | 'surface-moved';
+export type ChatRole = 'user' | 'agent' | 'system' | 'thought' | 'tool' | 'action' | 'script-diff' | 'build-script-result' | 'surface-moved';
 
 export type { DiscoveryChip } from '../types/hooks';
 
@@ -32,6 +32,12 @@ export interface ChatEntry {
   scriptEvent?: string;
   /** When role === 'surface-moved', the id of the entry the surface was moved to. */
   movedToEntryId?: string;
+  /** When role === 'build-script-result': the JS code the model emitted. */
+  buildScriptCode?: string;
+  /** When role === 'build-script-result': the feedback string (logs + status). */
+  buildScriptFeedback?: string;
+  /** When role === 'build-script-result': true if the script threw. */
+  buildScriptError?: boolean;
 }
 
 type Listener = () => void;
@@ -69,6 +75,9 @@ export class ChatStore {
       newCode: entry.newCode,
       scriptEvent: entry.scriptEvent,
       movedToEntryId: entry.movedToEntryId,
+      buildScriptCode: entry.buildScriptCode,
+      buildScriptFeedback: entry.buildScriptFeedback,
+      buildScriptError: entry.buildScriptError,
     };
     this.entries = [...this.entries, e];
     this.emit();

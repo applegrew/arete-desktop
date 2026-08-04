@@ -29,7 +29,7 @@ pub fn envelope_schema() -> Value {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "kind": { "type": "string", "enum": ["a2ui", "pageOp", "widgetScript"] },
+                        "kind": { "type": "string", "enum": ["a2ui", "pageOp", "widgetScript", "buildScript"] },
                         "targetSurfaceId": { "type": "string" },
                         "messages": { "type": "array", "items": {} },
                         "op": page_op_schema(),

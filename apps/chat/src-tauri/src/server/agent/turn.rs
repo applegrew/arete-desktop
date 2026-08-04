@@ -8,6 +8,7 @@ use super::mcp::{self, McpUiResource, ToolOutcome};
 use super::llm::LlmClient;
 use super::prompt::build_system_prompt;
 use super::schema::envelope_schema;
+use super::script;
 use super::skills::{load_skills, render_skills_for_prompt};
 use super::sse::Sink;
 use crate::server::db;
@@ -102,12 +103,14 @@ pub async fn run_agent_turn(
     // MCP tool pre-step (failure-tolerant; skipped when no tools).
     let mut ui_resources: Vec<McpUiResource> = Vec::new();
     let mut current_hints: HashMap<String, DisplayHint> = HashMap::new();
+    let mut tool_records: Vec<script::ToolCallRecord> = Vec::new();
     if !tool_infos.is_empty() {
-        pre_step(
+        let records = pre_step(
             state, llm, &tool_infos, ctx, &mut convo, sink,
             &mut ui_resources, &mut current_hints,
         )
         .await;
+        tool_records = records;
     }
 
     // Inject fresh display hints as a system message so the agent sees field-level
@@ -132,7 +135,7 @@ pub async fn run_agent_turn(
         let _ = db::set_state(&mut conn, &patch);
     }
 
-    match run_with_correction(llm, convo, ctx).await {
+    match run_with_correction(llm, convo, ctx, &tool_records).await {
         Ok(mut outcome) => {
             // Render captured MCP-UI resources as their own surfaces (framework-driven).
             for r in &ui_resources {
@@ -153,6 +156,7 @@ pub async fn run_agent_turn(
 /// Let the model call MCP tools (multi-step) before the envelope step. Any error
 /// skips the pre-step cleanly. Tool call events are streamed to the client immediately
 /// so the UI shows them incrementally, rather than all at once after the turn completes.
+/// Returns tool call records for buildScript access.
 async fn pre_step(
     state: &AppState,
     llm: &LlmClient,
@@ -162,18 +166,19 @@ async fn pre_step(
     sink: &Sink,
     ui_resources: &mut Vec<McpUiResource>,
     hints: &mut HashMap<String, DisplayHint>,
-) {
+) -> Vec<script::ToolCallRecord> {
+    let mut records: Vec<script::ToolCallRecord> = Vec::new();
     for _ in 0..MAX_TOOL_ROUNDS {
-        let step = match llm.chat_with_tools(convo, tool_infos).await {
+            let step = match llm.chat_with_tools(convo, tool_infos).await {
             Ok(s) => s,
             Err(e) => {
                 log_llm(json!({ "phase": "prestep.error", "error": e }));
-                return;
+                return records;
             }
         };
         if step.tool_calls.is_empty() {
             convo.push(step.message); // final assistant text → keep for context
-            return;
+            return records;
         }
         convo.push(step.message); // assistant message carrying the tool_calls
         for tc in step.tool_calls {
@@ -196,6 +201,13 @@ async fn pre_step(
             convo.push(json!({ "role": "tool", "tool_call_id": tc.id.clone(), "tool_name": tc.name.clone(), "content": outcome.text.clone() }));
             ui_resources.extend(outcome.ui);
 
+            // Record for buildScript context access.
+            records.push(script::ToolCallRecord {
+                name: tc.name.clone(),
+                args: tc.arguments.clone(),
+                result: parse_tool_result(&outcome.text),
+            });
+
             // Classify the tool result and collect display hints so the agent
             // gets field-level guidance (columns, badges, images, hides) for
             // building richer UI right after this turn's tool calls.
@@ -204,6 +216,7 @@ async fn pre_step(
             }
         }
     }
+    records
 }
 
 /// Built-in (non-MCP) tools offered to the model. `getSurfaceHistory` is offered
@@ -261,6 +274,7 @@ async fn run_with_correction(
     llm: &LlmClient,
     mut convo: Vec<Value>,
     ctx: &Value,
+    tool_records: &[script::ToolCallRecord],
 ) -> Result<Outcome, TurnError> {
     let mut corrections = 0usize;
     loop {
@@ -283,14 +297,27 @@ async fn run_with_correction(
                 log_llm(json!({ "phase": "envelope.parse_error", "attempt": corrections, "cause": pe.message }));
                 if corrections < MAX_CORRECTIONS {
                     corrections += 1;
+                    let is_truncated = pe.message.contains("EOF while parsing")
+                        || pe.message.contains("trailing characters");
                     let raw = pe.raw.clone().unwrap_or_default();
-                    let asst = if raw.trim().is_empty() {
-                        "(previous output was not valid JSON)".to_string()
+                    // When truncated, do NOT push the raw output back — it's malformed
+                    // JSON that just wastes context window and makes the next truncation
+                    // worse. Instead push a tight message suggesting buildScript.
+                    if is_truncated {
+                        // Trim old messages to free context window, but never orphan
+                        // tool messages from their preceding tool_calls (DeepSeek requires
+                        // every tool result to follow a tool_calls message).
+                        trim_context(&mut convo);
+                        convo.push(json!({ "role": "user", "content": parse_retry_msg(&pe.message) }));
                     } else {
-                        raw
-                    };
-                    convo.push(json!({ "role": "assistant", "content": asst }));
-                    convo.push(json!({ "role": "user", "content": parse_retry_msg(&pe.message) }));
+                        let asst = if raw.trim().is_empty() {
+                            "(previous output was not valid JSON)".to_string()
+                        } else {
+                            raw
+                        };
+                        convo.push(json!({ "role": "assistant", "content": asst }));
+                        convo.push(json!({ "role": "user", "content": parse_retry_msg(&pe.message) }));
+                    }
                     continue;
                 }
                 return Err((
@@ -305,7 +332,17 @@ async fn run_with_correction(
             .and_then(|e| e.as_array())
             .cloned()
             .unwrap_or_default();
-        let result = process_emissions(&emissions, ctx);
+        let result = process_emissions(&emissions, ctx, tool_records);
+
+        // Feed buildScript results back to the LLM so it can iterate on errors.
+        for v in &result.validated {
+            if v.get("kind").and_then(|k| k.as_str()) == Some("buildScriptResult") {
+                let feedback = v.get("feedback").and_then(|f| f.as_str()).unwrap_or("");
+                let is_error = v.get("error").and_then(|e| e.as_bool()).unwrap_or(false);
+                let role = if is_error { "user" } else { "user" };
+                convo.push(json!({ "role": role, "content": format!("[buildScript] {feedback}") }));
+            }
+        }
 
         if !result.issues.is_empty() {
             log_llm(json!({ "phase": "validation.issues", "attempt": corrections, "issues": result.issues }));
@@ -320,7 +357,7 @@ async fn run_with_correction(
             }
             return Err((
                 422,
-                json!({ "error": format!("Agent produced an invalid response after {MAX_CORRECTIONS} correction attempts"), "issues": result.issues }),
+                json!({ "error": format!("Agent produced an invalid response after {MAX_CORRECTIONS} correction attempts"), "issues": result.issues, "emissions": result.validated }),
             ));
         }
 
@@ -402,10 +439,70 @@ fn build_embed_emission(r: &McpUiResource) -> Value {
     })
 }
 
+/// Parse a tool result string into a Value. If the text is valid JSON, parse it;
+/// otherwise keep it as a plain string.
+fn parse_tool_result(text: &str) -> Value {
+    serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_string()))
+}
+
+/// Remove the oldest conversation messages (after the system prompt) to free
+/// context window, while preserving tool_calls→tool message pairings required by
+/// DeepSeek. Keeps the last user exchange + all tool-call blocks after it.
+fn trim_context(convo: &mut Vec<Value>) {
+    if convo.len() <= 4 {
+        return; // nothing meaningful to trim
+    }
+    // Walk backwards from the end to find the earliest message we must preserve.
+    // Every "tool" message requires its preceding "assistant" with "tool_calls".
+    let mut preserve_from = convo.len();
+    for i in (1..convo.len()).rev() {
+        let role = convo[i].get("role").and_then(|r| r.as_str()).unwrap_or("");
+        if role == "tool" {
+            // Find the preceding assistant that carries tool_calls.
+            for j in (1..i).rev() {
+                let jr = convo[j].get("role").and_then(|r| r.as_str()).unwrap_or("");
+                if jr == "assistant" && convo[j].get("tool_calls").is_some() {
+                    preserve_from = preserve_from.min(j);
+                    break;
+                }
+            }
+        }
+    }
+    // Also keep the user message that triggered the tool-call block for context.
+    if preserve_from < convo.len() {
+        for j in (1..preserve_from).rev() {
+            let jr = convo[j].get("role").and_then(|r| r.as_str()).unwrap_or("");
+            if jr == "user" {
+                preserve_from = j;
+                break;
+            }
+        }
+    }
+    if preserve_from > 1 {
+        convo.drain(1..preserve_from);
+    }
+}
+
 fn parse_retry_msg(cause: &str) -> String {
-    format!(
-        "Your previous response could not be parsed: {cause}. Respond again with ONLY a single valid JSON object matching the schema {{ reply, rationale, emissions }} — no markdown fences, no prose outside the JSON."
-    )
+    if cause.contains("EOF while parsing") {
+        format!(
+            "Your JSON output was TRUNCATED (too large for the model's output limit). \
+             Use a \"buildScript\" emission instead — write a compact JavaScript loop that \
+             calls surface().update() or surface().emit() to produce the component tree \
+             programmatically. Schema: {{\"kind\":\"buildScript\",\"code\":\"<JS>\"}}. \
+             Host API (ES5, sync only — no await): \
+             console.log(...), \
+             createSurface(catalogId) → string, \
+             surface(id) → handle with .update(components) and .emit(messages), \
+             context.data (flat dict of tool results), \
+             context.toolCalls (array of {{name, args, result}}). \
+             Use var, for loops, no arrow functions."
+        )
+    } else {
+        format!(
+            "Your previous response could not be parsed: {cause}. Respond again with ONLY a single valid JSON object matching the schema {{ reply, rationale, emissions }} — no markdown fences, no prose outside the JSON."
+        )
+    }
 }
 
 fn env_str(envelope: &Value, key: &str) -> Option<String> {
@@ -442,7 +539,7 @@ pub(crate) struct ProcessResult {
 
 /// Validate + normalize raw emissions: mint/inject surfaceIds, check the component
 /// graph, detect no-ops, resolve pageOp placeholders. Port of `processEmissions`.
-pub(crate) fn process_emissions(emissions: &[Value], ctx: &Value) -> ProcessResult {
+pub(crate) fn process_emissions(emissions: &[Value], ctx: &Value, tool_records: &[script::ToolCallRecord]) -> ProcessResult {
     let mut validated: Vec<Value> = Vec::new();
     let mut issues: Vec<String> = Vec::new();
     let mut noops: Vec<String> = Vec::new();
@@ -538,6 +635,67 @@ pub(crate) fn process_emissions(emissions: &[Value], ctx: &Value) -> ProcessResu
                 "kind": "widgetScript", "targetSurfaceId": sid,
                 "event": event, "runtime": runtime, "code": code,
             }));
+        } else if kind == "buildScript" {
+            let code = em.get("code").and_then(|c| c.as_str()).unwrap_or("");
+            if code.is_empty() {
+                issues.push("buildScript needs non-empty \"code\"".to_string());
+                continue;
+            }
+            // Build context.data — last result per tool name.
+            let mut tool_results: HashMap<String, Value> = HashMap::new();
+            for r in tool_records {
+                tool_results.insert(r.name.clone(), r.result.clone());
+            }
+            match script::execute(code, &tool_results, tool_records) {
+                Ok(output) => {
+                    // Emit the generated A2UI messages (gated normally by the client).
+                    for msg in &output.messages {
+                        validated.push(json!({
+                            "kind": "a2ui",
+                            "targetSurfaceId": msg.get("updateComponents")
+                                .and_then(|uc| uc.get("surfaceId"))
+                                .and_then(|s| s.as_str())
+                                .or_else(|| msg.get("createSurface").and_then(|cs| cs.get("surfaceId")).and_then(|s| s.as_str()))
+                                .unwrap_or(""),
+                            "messages": [msg],
+                        }));
+                    }
+                    // Emit a buildScript record for the frontend tile + LLM feedback.
+                    let feedback = if output.logs.is_empty() {
+                        format!("OK — {} messages, {} surfaces created",
+                            output.messages.len(), output.created_surfaces.len())
+                    } else {
+                        format!("OK — {} messages, {} surfaces created\n  [log] {}",
+                            output.messages.len(), output.created_surfaces.len(),
+                            output.logs.join("\n  [log] "))
+                    };
+                    validated.push(json!({
+                        "kind": "buildScriptResult",
+                        "code": code,
+                        "logs": output.logs,
+                        "feedback": feedback,
+                        "error": false,
+                    }));
+                }
+                Err(e) => {
+                    let feedback = format!("FAILED — {e}");
+                    issues.push(format!(
+                        "buildScript execution error: {e}. \
+                         The script sandbox is ES5-only (no await, no java, no fetch, no require). \
+                         Available APIs: surface(id).update(components), surface(id).emit(messages), \
+                         createSurface(catalogId), console.log(...), context.data, context.toolCalls. \
+                         Pre-fetch data via tools in the pre-step, then access it as context.data.<toolName>. \
+                         If context.toolCalls is empty, the pre-step failed — use context.data instead."
+                    ));
+                    validated.push(json!({
+                        "kind": "buildScriptResult",
+                        "code": code,
+                        "logs": [],
+                        "feedback": feedback,
+                        "error": true,
+                    }));
+                }
+            }
         }
     }
 

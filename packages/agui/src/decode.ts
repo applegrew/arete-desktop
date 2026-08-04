@@ -86,6 +86,9 @@ function asEmission(value: unknown): Emission | null {
   ) {
     return v as unknown as Emission;
   }
+  if (v.kind === 'buildScriptResult' && typeof v.code === 'string') {
+    return v as unknown as Emission;
+  }
   return null;
 }
 

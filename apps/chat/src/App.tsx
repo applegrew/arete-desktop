@@ -903,6 +903,14 @@ function WorkspaceView({ workspaceId, initialActiveTabId, initialChatDockState, 
                 event: emission.event,
                 code: emission.code,
               });
+            } else if (emission.kind === 'buildScriptResult') {
+              // Server-executed buildScript: show a tile with the code + feedback.
+              chatStore.push({
+                role: 'build-script-result',
+                buildScriptCode: emission.code,
+                buildScriptFeedback: emission.feedback,
+                buildScriptError: emission.error,
+              });
             }
           },
           onDiscoveryChips: (chips) => {

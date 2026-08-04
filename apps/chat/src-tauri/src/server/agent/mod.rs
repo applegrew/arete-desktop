@@ -5,6 +5,7 @@ pub mod log;
 pub mod mcp;
 pub mod prompt;
 pub mod schema;
+pub mod script;
 pub mod skills;
 pub mod sse;
 pub mod turn;
@@ -119,6 +120,14 @@ pub async fn run_turn(State(st): State<AppState>, Json(body): Json<Value>) -> Re
                 sink.run_finished(&thread_id, &run_id).await;
             }
             Err((status, body)) => {
+                // Stream any buildScriptResult error tiles so the user sees them.
+                if let Some(emissions) = body.get("emissions").and_then(|e| e.as_array()) {
+                    for emission in emissions {
+                        if emission.get("kind").and_then(|k| k.as_str()) == Some("buildScriptResult") {
+                            sink.emission(emission).await;
+                        }
+                    }
+                }
                 let msg = body.get("error").and_then(|e| e.as_str()).unwrap_or("agent error");
                 sink.run_error(msg, Some(&status.to_string())).await;
             }

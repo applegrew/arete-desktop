@@ -32,8 +32,17 @@ export interface WidgetScriptEmission {
   code: string;
 }
 
-/** One unit of agent output: A2UI content, a page op, or a widget handler script. */
-export type Emission = A2uiEmission | PageOpEmission | WidgetScriptEmission;
+/** Result of a server-executed buildScript emission (for the frontend tile). */
+export interface BuildScriptResultEmission {
+  kind: 'buildScriptResult';
+  code: string;
+  logs: string[];
+  feedback: string;
+  error: boolean;
+}
+
+/** One unit of agent output: A2UI content, a page op, a widget handler script, or a buildScript result. */
+export type Emission = A2uiEmission | PageOpEmission | WidgetScriptEmission | BuildScriptResultEmission;
 
 /**
  * The full response envelope an agent turn returns.

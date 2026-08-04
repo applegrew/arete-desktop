@@ -38,6 +38,7 @@ reqwest_mcp = { package = "reqwest", version = "0.13" }
 futures = "0.3"
 sse-stream = "0.2"
 regex = "1"
+boa_engine = "0.19"
 
 [features]
 # default Tauri custom-protocol feature for production builds
