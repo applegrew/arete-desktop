@@ -30,14 +30,29 @@ pub async fn create(
     let b = body.as_object().cloned().unwrap_or_default();
     let now = now_ms();
 
-    let id = b
+    let requested_id = b
         .get("id")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("page-{}", short_uuid()));
+        .map(|s| s.to_string());
 
-    let existing = db::get_page(&conn, &id)?;
+    // Page ids are global in storage, but a "well-known id" (e.g. the agent's
+    // dedupe id for "the dashboard") is only meaningful within one workspace.
+    // If the requested id already belongs to a *different* workspace, treating
+    // it as "existing" would hijack that other workspace's page — silently
+    // overwriting its title/layout and vanishing it from its own workspace.
+    // Fall back to a fresh id instead, exactly as if none had been requested.
+    let existing = match requested_id.as_deref().map(|id| db::get_page(&conn, id)).transpose()? {
+        Some(Some(e)) if e.workspace_id == ws => Some(e),
+        _ => None,
+    };
+    let id = match &existing {
+        Some(e) => e.id.clone(),
+        None => match &requested_id {
+            Some(id) if db::get_page(&conn, id)?.is_none() => id.clone(),
+            _ => format!("page-{}", short_uuid()),
+        },
+    };
     let page = ApiPage {
         id: id.clone(),
         title: b

@@ -109,6 +109,7 @@ impl LlmClient {
                 "messages": messages,
                 "stream": false,
                 "response_format": { "type": "json_object" },
+                "max_tokens": 16384,
                 "thinking": { "type": "disabled" },
             }),
         };
@@ -133,10 +134,24 @@ impl LlmClient {
             .and_then(|c| c.as_str())
             .unwrap_or("")
             .to_string();
-        serde_json::from_str::<Value>(&content).map_err(|e| ParseError {
-            message: format!("output was not valid JSON for the required schema: {e}"),
-            raw: Some(content),
-        })
+        // Take only the first complete JSON value. `json_object` mode (DeepSeek)
+        // guarantees the output contains valid JSON, not that the output is
+        // *nothing but* that JSON — models sometimes trail off with extra
+        // commentary after the closing brace. A plain `from_str` would reject
+        // that as "trailing characters" even though the envelope itself parsed
+        // fine; a genuine truncation still surfaces as a real parse error here.
+        let mut stream = serde_json::Deserializer::from_str(&content).into_iter::<Value>();
+        match stream.next() {
+            Some(Ok(v)) => Ok(v),
+            Some(Err(e)) => Err(ParseError {
+                message: format!("output was not valid JSON for the required schema: {e}"),
+                raw: Some(content),
+            }),
+            None => Err(ParseError {
+                message: "output was empty".to_string(),
+                raw: Some(content),
+            }),
+        }
     }
 
     /// A tool-calling step. Returns the assistant message and any requested tool
@@ -148,15 +163,16 @@ impl LlmClient {
     ) -> Result<ChatStep, String> {
         let tools: Vec<Value> = tool_infos
             .iter()
-            .map(|t| {
-                json!({
+            .filter_map(|t| {
+                let name = t.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty())?;
+                Some(json!({
                     "type": "function",
                     "function": {
-                        "name": t.get("name").cloned().unwrap_or(Value::Null),
+                        "name": name,
                         "description": t.get("description").cloned().unwrap_or(Value::Null),
                         "parameters": t.get("parameters").cloned().unwrap_or_else(|| json!({})),
                     }
-                })
+                }))
             })
             .collect();
         let body = match self.provider {
