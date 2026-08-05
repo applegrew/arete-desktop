@@ -52,8 +52,14 @@ export const Dialog = createComponentImplementation(DialogApi, ({ props, buildCh
       <PrimeDialog
         header={props.header}
         visible={visible}
-        closable={props.closable ?? true}
-        closeOnEscape={props.closeOnEscape ?? true}
+        // Default to false: PrimeReact's own X/Esc dismiss only flips local
+        // state, bypassing whatever action closes the dialog in the surface
+        // model. That desyncs `visible` from the model's stored value, and
+        // since useControlledValue only re-syncs on an actual prop CHANGE,
+        // reopening with the same visible:true becomes a silent no-op. All
+        // dismissal should go through an agent-authored action instead.
+        closable={props.closable ?? false}
+        closeOnEscape={props.closeOnEscape ?? false}
         modal={props.modal ?? true}
         draggable={props.draggable ?? true}
         resizable={props.resizable ?? true}
